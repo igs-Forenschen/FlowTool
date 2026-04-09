@@ -620,9 +620,10 @@ function drawConnection(svg, conn, fromNode, toNode) {
     const fpIn = inset(fp, exitSide);
     const tpIn = inset(tp, entrySide);
     drawPoseShape(svgTop, shapeId, fpIn.x, fpIn.y, 7, dFill, lineColor);
-    // If samePose, use same shape on both ends; otherwise use diamond on entry
-    const entryShapeId = conn.samePose ? shapeId : 'diamond';
-    drawPoseShape(svgTop, entryShapeId, tpIn.x, tpIn.y, 7, dFill, lineColor);
+    // 有勾「頭尾幀同動作」才在尾端也畫相同圖案，否則不畫
+    if (conn.samePose) {
+      drawPoseShape(svgTop, shapeId, tpIn.x, tpIn.y, 7, dFill, lineColor);
+    }
   }
 
   // Arrowheads: forward on last segment, backward on first segment
@@ -861,12 +862,47 @@ function onNodeMousedown(e, nodeId) {
     return;
   }
 
-  // Select
+  const dragon = getDragon();
+  const isInMultiSelect = state.multiSelect.nodes.includes(nodeId);
+
+  // ── Multi-select group drag ──
+  if (isInMultiSelect && state.multiSelect.nodes.length > 1) {
+    const nodeIds = state.multiSelect.nodes;
+    const origPositions = nodeIds.map(id => {
+      const n = dragon.nodes.find(n => n.id === id);
+      return { id, x: n.x, y: n.y };
+    });
+    const startMouseX = e.clientX, startMouseY = e.clientY;
+
+    const onMove = ev => {
+      const dx = ev.clientX - startMouseX;
+      const dy = ev.clientY - startMouseY;
+      origPositions.forEach(o => {
+        const n = dragon.nodes.find(n => n.id === o.id);
+        if (!n) return;
+        n.x = Math.max(0, o.x + dx);
+        n.y = Math.max(0, o.y + dy);
+        const el = document.getElementById('node-' + o.id);
+        if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; }
+      });
+      renderConnections();
+    };
+
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return;
+  }
+
+  // ── Single node select + drag ──
   state.selectedNode = nodeId;
   state.selectedConn = null;
+  state.multiSelect = { nodes: [], conns: [], regions: [] };
 
-  // Start drag
-  const dragon = getDragon();
   const node = dragon.nodes.find(n => n.id === nodeId);
   state.dragging = { nodeId, startMouseX: e.clientX, startMouseY: e.clientY, startNodeX: node.x, startNodeY: node.y };
 
