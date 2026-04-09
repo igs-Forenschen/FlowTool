@@ -55,6 +55,8 @@ body { font-family: 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
 .node-body { padding: 8px 12px 10px; }
 .node-name { font-size: 13px; font-family: 'Consolas', 'Courier New', monospace; line-height: 1.4; word-break: break-all; }
 .node-notes { font-size: 11px; margin-top: 5px; opacity: 0.7; font-style: italic; }
+.resize-handle { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: se-resize; pointer-events: auto; }
+.resize-handle::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 7px; height: 7px; border-right: 2px solid #7eb8f0; border-bottom: 2px solid #7eb8f0; border-radius: 0 0 2px 0; }
 
 /* Status bar */
 #statusbar { background: #12121a; border-top: 1px solid #2a2a38; padding: 4px 14px; font-size: 11px; color: #555; flex-shrink: 0; }
@@ -474,14 +476,20 @@ function drawConnection(svg, conn, fromNode, toNode) {
     bg.setAttribute('x', lx - bgW/2); bg.setAttribute('y', ly - 13);
     bg.setAttribute('width', bgW);    bg.setAttribute('height', 17);
     bg.setAttribute('fill', '#12121a'); bg.setAttribute('rx', 4);
-    bg.style.pointerEvents = 'none';
+    bg.style.pointerEvents = 'auto';
+    bg.style.cursor = 'pointer';
+    bg.onclick = (e) => { e.stopPropagation(); state.selectedConn = conn.id; state.selectedNode = null; renderConnections(); setStatus('已選取連線 — 按 Del 刪除，雙擊文字編輯'); };
+    bg.ondblclick = (e) => { e.stopPropagation(); openConnEdit(conn.id); };
     svg.appendChild(bg);
     const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     textEl.setAttribute('x', lx); textEl.setAttribute('y', ly);
     textEl.setAttribute('text-anchor', 'middle'); textEl.setAttribute('font-size', '11');
     textEl.setAttribute('fill', '#7eb8f0');
     textEl.setAttribute('font-family', 'Segoe UI, sans-serif');
-    textEl.style.pointerEvents = 'none';
+    textEl.style.pointerEvents = 'auto';
+    textEl.style.cursor = 'pointer';
+    textEl.onclick = (e) => { e.stopPropagation(); state.selectedConn = conn.id; state.selectedNode = null; renderConnections(); setStatus('已選取連線 — 按 Del 刪除，雙擊文字編輯'); };
+    textEl.ondblclick = (e) => { e.stopPropagation(); openConnEdit(conn.id); };
     textEl.textContent = conn.label;
     svg.appendChild(textEl);
   }
@@ -559,6 +567,7 @@ function renderCanvas() {
     div.id = 'node-' + node.id;
     div.style.left = node.x + 'px';
     div.style.top = node.y + 'px';
+    if (node.w) div.style.width = node.w + 'px';
     div.style.background = cat.bg;
     div.style.borderColor = cat.border;
 
@@ -566,17 +575,47 @@ function renderCanvas() {
       <div class="node-body">
         <div class="node-name" style="color:${cat.text}">${node.name}</div>
         ${node.notes ? `<div class="node-notes" style="color:${cat.label}">${node.notes}</div>` : ''}
-      </div>`;
+      </div>
+      ${state.selectedNode === node.id ? `<div class="resize-handle" data-nid="${node.id}"></div>` : ''}`;
 
     div.addEventListener('mousedown', e => onNodeMousedown(e, node.id));
     div.addEventListener('dblclick', e => { e.stopPropagation(); openNodeEdit(node.id); });
+
+    // Resize handle drag
+    if (state.selectedNode === node.id) {
+      const handle = div.querySelector('.resize-handle');
+      if (handle) {
+        handle.addEventListener('mousedown', e => {
+          e.stopPropagation();
+          const startX = e.clientX, startY = e.clientY;
+          const origW = node.w || div.offsetWidth;
+          const origH = node.h || div.offsetHeight;
+          const onMove = ev => {
+            node.w = Math.max(120, origW + ev.clientX - startX);
+            node.h = Math.max(40,  origH + ev.clientY - startY);
+            div.style.width  = node.w + 'px';
+            div.style.height = node.h + 'px';
+            renderConnections();
+          };
+          const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+          };
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        });
+      }
+    }
+
     canvas.appendChild(div);
 
-    // Measure actual size after render
-    requestAnimationFrame(() => {
-      node.w = div.offsetWidth;
-      node.h = div.offsetHeight;
-    });
+    // Measure size if not yet stored
+    if (!node.w) {
+      requestAnimationFrame(() => {
+        node.w = div.offsetWidth;
+        node.h = div.offsetHeight;
+      });
+    }
   });
 }
 
@@ -1273,6 +1312,12 @@ document.addEventListener('keydown', e => {
       if (!dragon) return;
       dragon.connections = dragon.connections.filter(c => c.id !== state.selectedConn);
       state.selectedConn = null;
+      renderCanvas();
+    } else if (state.selectedRegion) {
+      const dragon = getDragon();
+      if (!dragon) return;
+      dragon.regions = (dragon.regions || []).filter(r => r.id !== state.selectedRegion);
+      state.selectedRegion = null;
       renderCanvas();
     }
   }
