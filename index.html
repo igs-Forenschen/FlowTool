@@ -178,8 +178,8 @@ body.preview-mode .node { cursor: default !important; }
     </div>
     <div style="margin-bottom:14px">
       <label class="modal-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-        <input type="checkbox" id="conn-same-pose" style="width:14px;height:14px;cursor:pointer;">
-        頭尾幀同動作（兩端使用相同圖案）
+        <input type="checkbox" id="conn-same-pose" style="width:14px;height:14px;cursor:pointer;" checked>
+        頭尾幀同動作（兩端都套用圖案）
       </label>
     </div>
     <div style="margin-bottom:4px">
@@ -237,7 +237,7 @@ body.preview-mode .node { cursor: default !important; }
     <div style="margin-bottom:14px">
       <label class="modal-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
         <input type="checkbox" id="conn-edit-same-pose" style="width:14px;height:14px;cursor:pointer;">
-        頭尾幀同動作（兩端使用相同圖案）
+        頭尾幀同動作（兩端都套用圖案）
       </label>
     </div>
     <div style="margin-bottom:4px">
@@ -310,6 +310,7 @@ function confirmResolve(ok) {
 
 // ─── Pose endpoint shapes ─────────────────────────────────────────────────────
 const POSE_SHAPES = [
+  { id: 'none',     label: '無',     draw: () => {} },
   { id: 'diamond',  label: '菱形',   draw: (s,x,y,sz,f,st) => { const p=document.createElementNS('http://www.w3.org/2000/svg','polygon'); p.setAttribute('points',`${x},${y-sz} ${x+sz},${y} ${x},${y+sz} ${x-sz},${y}`); p.setAttribute('fill',f); p.setAttribute('stroke',st); p.setAttribute('stroke-width','1.5'); p.style.pointerEvents='none'; s.appendChild(p); } },
   { id: 'circle',   label: '圓形',   draw: (s,x,y,sz,f,st) => { const c=document.createElementNS('http://www.w3.org/2000/svg','circle'); c.setAttribute('cx',x); c.setAttribute('cy',y); c.setAttribute('r',sz*0.85); c.setAttribute('fill',f); c.setAttribute('stroke',st); c.setAttribute('stroke-width','1.5'); c.style.pointerEvents='none'; s.appendChild(c); } },
   { id: 'square',   label: '方形',   draw: (s,x,y,sz,f,st) => { const r=document.createElementNS('http://www.w3.org/2000/svg','rect'); r.setAttribute('x',x-sz*0.8); r.setAttribute('y',y-sz*0.8); r.setAttribute('width',sz*1.6); r.setAttribute('height',sz*1.6); r.setAttribute('fill',f); r.setAttribute('stroke',st); r.setAttribute('stroke-width','1.5'); r.setAttribute('rx','2'); r.style.pointerEvents='none'; s.appendChild(r); } },
@@ -608,21 +609,25 @@ function drawConnection(svg, conn, fromNode, toNode) {
   // Pose markers — drawn in svg-top (above nodes) so they're never covered
   const svgTop = document.getElementById('svg-top');
   if (svgTop) {
-    const dFill = '#14141e';
     const shapeId = conn.shape || 'diamond';
-    const inset = (pt, side) => {
-      const OFF = 5;
-      if (side==='right')  return { x: pt.x - OFF, y: pt.y };
-      if (side==='left')   return { x: pt.x + OFF, y: pt.y };
-      if (side==='bottom') return { x: pt.x, y: pt.y - OFF };
-      return                      { x: pt.x, y: pt.y + OFF };
-    };
-    const fpIn = inset(fp, exitSide);
-    const tpIn = inset(tp, entrySide);
-    drawPoseShape(svgTop, shapeId, fpIn.x, fpIn.y, 7, dFill, lineColor);
-    // 有勾「頭尾幀同動作」才在尾端也畫相同圖案，否則不畫
-    if (conn.samePose) {
-      drawPoseShape(svgTop, shapeId, tpIn.x, tpIn.y, 7, dFill, lineColor);
+    if (shapeId !== 'none') {
+      const dFill = '#14141e';
+      const inset = (pt, side) => {
+        const OFF = 5;
+        if (side==='right')  return { x: pt.x - OFF, y: pt.y };
+        if (side==='left')   return { x: pt.x + OFF, y: pt.y };
+        if (side==='bottom') return { x: pt.x, y: pt.y - OFF };
+        return                      { x: pt.x, y: pt.y + OFF };
+      };
+      const fpIn = inset(fp, exitSide);
+      const tpIn = inset(tp, entrySide);
+      // Always draw head shape
+      drawPoseShape(svgTop, shapeId, fpIn.x, fpIn.y, 7, dFill, lineColor);
+      // Draw tail shape only if samePose is checked (default true)
+      const samePose = conn.samePose !== false;
+      if (samePose) {
+        drawPoseShape(svgTop, shapeId, tpIn.x, tpIn.y, 7, dFill, lineColor);
+      }
     }
   }
 
@@ -961,9 +966,7 @@ function handleConnectClick(nodeId) {
     document.querySelector('input[name="conn-dir"][value="forward"]').checked = true;
     state.selectedConnColor = 'blue';
     state.selectedConnShape = 'diamond';
-    state.selectedConnSamePose = false;
-    document.getElementById('conn-same-pose').checked = false;
-    document.getElementById('conn-same-pose').onchange = e => { state.selectedConnSamePose = e.target.checked; };
+    document.getElementById('conn-same-pose').checked = true;
     buildConnColorPicker('conn-color-picker', false);
     buildShapePicker('conn-shape-picker', false);
     showModal('modal-conn');
@@ -974,6 +977,7 @@ function confirmConnect() {
   const dragon = getDragon();
   if (!dragon || !state.pendingConn) return;
   const dir = document.querySelector('input[name="conn-dir"]:checked').value;
+  const samePose = document.getElementById('conn-same-pose').checked;
   dragon.connections.push({
     id: cid(),
     from: state.pendingConn.from,
@@ -982,7 +986,7 @@ function confirmConnect() {
     dir,
     color: state.selectedConnColor,
     shape: state.selectedConnShape,
-    samePose: state.selectedConnSamePose,
+    samePose,
   });
   state.pendingConn = null;
   hideModal('modal-conn');
@@ -1044,11 +1048,8 @@ function openConnEdit(connId) {
   state.selectedConn = connId;
   state.editingConnColor = conn.color || 'blue';
   state.editingConnShape = conn.shape || 'diamond';
-  state.editingConnSamePose = conn.samePose || false;
   document.querySelector(`input[name="conn-edit-dir"][value="${conn.dir}"]`).checked = true;
-  const spCb = document.getElementById('conn-edit-same-pose');
-  spCb.checked = state.editingConnSamePose;
-  spCb.onchange = e => { state.editingConnSamePose = e.target.checked; };
+  document.getElementById('conn-edit-same-pose').checked = conn.samePose !== false;
   buildConnColorPicker('conn-edit-color-picker', true);
   buildShapePicker('conn-edit-shape-picker', true);
   showModal('modal-conn-edit');
@@ -1062,7 +1063,7 @@ function saveConn() {
   conn.dir      = document.querySelector('input[name="conn-edit-dir"]:checked').value;
   conn.color    = state.editingConnColor;
   conn.shape    = state.editingConnShape;
-  conn.samePose = state.editingConnSamePose;
+  conn.samePose = document.getElementById('conn-edit-same-pose').checked;
   state.selectedConn = null;
   hideModal('modal-conn-edit');
   renderCanvas();
@@ -1295,15 +1296,30 @@ function buildShapePicker(containerId, isEdit) {
     const isSel = sh.id === selectedId;
     btn.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 8px;border-radius:6px;cursor:pointer;
       border:2px solid ${isSel ? '#7eb8f0' : 'transparent'};background:${isSel ? 'rgba(126,184,240,0.12)' : 'transparent'};`;
-    // Mini SVG preview
-    const preview = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    preview.setAttribute('width', '24'); preview.setAttribute('height', '24');
-    preview.setAttribute('viewBox', '0 0 24 24');
-    drawPoseShape(preview, sh.id, 12, 12, 8, '#14141e', '#7eb8f0');
+
+    if (sh.id === 'none') {
+      // Show a dash/line for "none"
+      const preview = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      preview.setAttribute('width', '24'); preview.setAttribute('height', '24');
+      preview.setAttribute('viewBox', '0 0 24 24');
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', '4'); line.setAttribute('y1', '12');
+      line.setAttribute('x2', '20'); line.setAttribute('y2', '12');
+      line.setAttribute('stroke', '#666'); line.setAttribute('stroke-width', '2');
+      line.setAttribute('stroke-dasharray', '3,2');
+      preview.appendChild(line);
+      btn.appendChild(preview);
+    } else {
+      const preview = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      preview.setAttribute('width', '24'); preview.setAttribute('height', '24');
+      preview.setAttribute('viewBox', '0 0 24 24');
+      drawPoseShape(preview, sh.id, 12, 12, 8, '#14141e', '#7eb8f0');
+      btn.appendChild(preview);
+    }
+
     const lbl = document.createElement('span');
     lbl.style.cssText = 'font-size:10px;color:#aaa;white-space:nowrap;';
     lbl.textContent = sh.label;
-    btn.appendChild(preview);
     btn.appendChild(lbl);
     btn.onclick = () => {
       if (isEdit) state.editingConnShape = sh.id;

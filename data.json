@@ -3,119 +3,230 @@
     {
       "id": "n2",
       "name": "Small_PurpleDragon",
+      "nodes": [],
+      "connections": [],
+      "regions": []
+    },
+    {
+      "id": "n32",
+      "name": "金剛測試",
       "nodes": [
         {
-          "id": "n13",
-          "name": "Small_PurpleDragon_Death_01",
+          "id": "n33",
+          "name": "InGame",
           "cat": "其他",
-          "x": 416,
-          "y": 326,
+          "x": 59,
+          "y": 240,
           "notes": "",
-          "w": 159,
-          "h": 62
+          "w": 150,
+          "h": 38
         },
         {
-          "id": "n14",
-          "name": "Small_PurpleDragon_Death_02",
+          "id": "n34",
+          "name": "standby",
           "cat": "其他",
-          "x": 734,
-          "y": 327,
+          "x": 327,
+          "y": 240,
           "notes": "",
-          "w": 157,
-          "h": 54
+          "w": 150,
+          "h": 38
         },
         {
-          "id": "n15",
-          "name": "Small_PurpleDragon_fly",
+          "id": "n35",
+          "name": "leave",
           "cat": "其他",
-          "x": 54,
-          "y": 84,
+          "x": 327,
+          "y": 89,
           "notes": "",
-          "w": 155,
-          "h": 54
+          "w": 150,
+          "h": 38
         },
         {
-          "id": "n16",
-          "name": "Small_PurpleDragon_fly_02",
-          "cat": "其他",
-          "x": 490,
-          "y": 78,
+          "id": "n36",
+          "name": "Walk",
+          "cat": "移動",
+          "x": 672,
+          "y": 240,
           "notes": "",
-          "w": 131,
-          "h": 67
+          "w": 150,
+          "h": 38
         },
         {
-          "id": "n17",
-          "name": "Small_PurpleDragon_fly_eye",
+          "id": "n37",
+          "name": "idle_01 / idle_01_1 / idle_02",
           "cat": "其他",
-          "x": 103,
-          "y": 342,
+          "x": 302,
+          "y": 408,
           "notes": "",
-          "w": 159,
+          "w": 200,
           "h": 56
+        },
+        {
+          "id": "n38",
+          "name": "idle_03",
+          "cat": "其他",
+          "x": 672,
+          "y": 427,
+          "notes": "",
+          "w": 150,
+          "h": 38
+        },
+        {
+          "id": "n39",
+          "name": "hit_s / hit_l",
+          "cat": "其他",
+          "x": 914,
+          "y": 239,
+          "notes": "",
+          "w": 150,
+          "h": 38
+        },
+        {
+          "id": "n40",
+          "name": "Charged Jump",
+          "cat": "其他",
+          "x": 952,
+          "y": 482,
+          "notes": "",
+          "w": 150,
+          "h": 38
+        },
+        {
+          "id": "n41",
+          "name": "slide",
+          "cat": "其他",
+          "x": 1248,
+          "y": 239,
+          "notes": "",
+          "w": 150,
+          "h": 38
+        },
+        {
+          "id": "n42",
+          "name": "die / slide+die",
+          "cat": "死亡",
+          "x": 1216,
+          "y": 413,
+          "notes": "",
+          "w": 150,
+          "h": 38
         }
       ],
       "connections": [
         {
-          "id": "c18",
-          "from": "n16",
-          "to": "n15",
-          "label": "常駐fly、機率播放fly02",
-          "dir": "both"
+          "id": "c43",
+          "from": "n33",
+          "to": "n34",
+          "label": "",
+          "dir": "forward",
+          "color": "blue",
+          "shape": "diamond",
+          "samePose": true
         },
         {
-          "id": "c21",
-          "from": "n15",
-          "to": "n13",
-          "label": "龍死亡就瞬切",
-          "dir": "forward"
+          "id": "c44",
+          "from": "n34",
+          "to": "n36",
+          "label": "",
+          "dir": "forward",
+          "color": "blue",
+          "shape": "diamond",
+          "samePose": true
         },
         {
-          "id": "c22",
-          "from": "n13",
-          "to": "n14",
-          "label": "暈眩後墜落",
-          "dir": "forward"
+          "id": "c45",
+          "from": "n34",
+          "to": "n35",
+          "label": "",
+          "dir": "forward",
+          "color": "blue",
+          "shape": "diamond",
+          "samePose": true
         },
         {
-          "id": "c23",
-          "from": "n16",
-          "to": "n13",
-          "label": "龍死亡就瞬切",
-          "dir": "forward"
+          "id": "c46",
+          "from": "n36",
+          "to": "n39",
+          "label": "",
+          "dir": "forward",
+          "color": "blue",
+          "shape": "diamond",
+          "samePose": false
+        },
+        {
+          "id": "c47",
+          "from": "n39",
+          "to": "n41",
+          "label": "",
+          "dir": "forward",
+          "color": "red",
+          "shape": "diamond",
+          "samePose": false
+        },
+        {
+          "id": "c48",
+          "from": "n39",
+          "to": "n42",
+          "label": "",
+          "dir": "forward",
+          "color": "red",
+          "shape": "diamond",
+          "samePose": false
+        },
+        {
+          "id": "c49",
+          "from": "n34",
+          "to": "n37",
+          "label": "",
+          "dir": "forward",
+          "color": "blue",
+          "shape": "diamond",
+          "samePose": true
+        },
+        {
+          "id": "c50",
+          "from": "n37",
+          "to": "n36",
+          "label": "",
+          "dir": "forward",
+          "color": "blue",
+          "shape": "diamond",
+          "samePose": true
+        },
+        {
+          "id": "c51",
+          "from": "n36",
+          "to": "n38",
+          "label": "",
+          "dir": "forward",
+          "color": "blue",
+          "shape": "diamond",
+          "samePose": true
+        },
+        {
+          "id": "c52",
+          "from": "n36",
+          "to": "n40",
+          "label": "",
+          "dir": "forward",
+          "color": "blue",
+          "shape": "diamond",
+          "samePose": true
+        },
+        {
+          "id": "c53",
+          "from": "n40",
+          "to": "n41",
+          "label": "",
+          "dir": "forward",
+          "color": "green",
+          "shape": "diamond",
+          "samePose": false
         }
       ],
-      "regions": [
-        {
-          "id": "n19",
-          "label": "常駐播放",
-          "color": "coral",
-          "x": 39,
-          "y": 320,
-          "w": 253,
-          "h": 94
-        },
-        {
-          "id": "n20",
-          "label": "待機動作",
-          "color": "green",
-          "x": 31,
-          "y": 17,
-          "w": 649,
-          "h": 155
-        },
-        {
-          "id": "n24",
-          "label": "死亡動作",
-          "color": "pink",
-          "x": 389,
-          "y": 291,
-          "w": 529,
-          "h": 134
-        }
-      ]
+      "regions": []
     }
   ],
-  "activeDragon": "n2",
-  "nextId": 25
+  "activeDragon": "n32",
+  "nextId": 54
 }
