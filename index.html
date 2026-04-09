@@ -458,22 +458,68 @@ function svgDiamond(svg, x, y, size, fill, stroke) {
   svg.appendChild(poly);
 }
 
+// ─── Shared side-detection (used by offset computation AND orthoRoute) ────────
+function connSides(fn, tn) {
+  const fcx = fn.x+(fn.w||160)/2, fcy = fn.y+(fn.h||70)/2;
+  const tcx = tn.x+(tn.w||160)/2, tcy = tn.y+(tn.h||70)/2;
+  const dx = tcx-fcx, dy = tcy-fcy;
+  let exitSide, entrySide;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    exitSide  = dx > 0 ? 'right' : 'left';
+    entrySide = dx > 0 ? 'left'  : 'right';
+  } else {
+    exitSide  = dy > 0 ? 'bottom' : 'top';
+    entrySide = dy > 0 ? 'top'    : 'bottom';
+  }
+  return { exitSide, entrySide };
+}
+
+// ─── Pre-compute edge offsets so parallel connections are spread apart ─────────
+function computeConnOffsets(dragon) {
+  const edgeGroups = {}; // `nodeId|side` -> [connId, ...]
+  dragon.connections.forEach(conn => {
+    const fn = dragon.nodes.find(n => n.id === conn.from);
+    const tn = dragon.nodes.find(n => n.id === conn.to);
+    if (!fn || !tn) return;
+    const { exitSide, entrySide } = connSides(fn, tn);
+    const fromKey = `${conn.from}|${exitSide}`;
+    const toKey   = `${conn.to}|${entrySide}`;
+    if (!edgeGroups[fromKey]) edgeGroups[fromKey] = [];
+    if (!edgeGroups[toKey])   edgeGroups[toKey]   = [];
+    if (!edgeGroups[fromKey].includes(conn.id)) edgeGroups[fromKey].push(conn.id);
+    if (!edgeGroups[toKey].includes(conn.id))   edgeGroups[toKey].push(conn.id);
+  });
+
+  const offsets = {}; // connId -> { from: frac, to: frac }
+  Object.entries(edgeGroups).forEach(([key, connIds]) => {
+    const n = connIds.length;
+    const parts = key.split('|');
+    const nodeId = parts[0];
+    connIds.forEach((connId, i) => {
+      if (!offsets[connId]) offsets[connId] = { from: 0.5, to: 0.5 };
+      // Spread evenly: 1 conn → 0.5, 2 conns → 0.33/0.67, 3 → 0.25/0.5/0.75, etc.
+      const frac = (i + 1) / (n + 1);
+      const conn = dragon.connections.find(c => c.id === connId);
+      if (!conn) return;
+      if (conn.from === nodeId) offsets[connId].from = frac;
+      else offsets[connId].to = frac;
+    });
+  });
+  return offsets;
+}
+
 // ─── Orthogonal routing ───────────────────────────────────────────────────────
-// Returns { points, exitSide, entrySide } for an orthogonal path A→B
-function orthoRoute(fn, tn) {
+function orthoRoute(fn, tn, fromFrac = 0.5, toFrac = 0.5) {
   const fw = fn.w||160, fh = fn.h||70;
   const tw = tn.w||160, th = tn.h||70;
   const fL = fn.x, fR = fn.x+fw, fT = fn.y, fB = fn.y+fh;
   const tL = tn.x, tR = tn.x+tw, tT = tn.y, tB = tn.y+th;
   const fcx = fn.x+fw/2, fcy = fn.y+fh/2;
   const tcx = tn.x+tw/2, tcy = tn.y+th/2;
-  const GAP = 18; // clearance outside node
+  const GAP = 18;
 
-  // Determine best exit/entry sides based on relative position
   const dx = tcx - fcx, dy = tcy - fcy;
   let exitSide, entrySide;
-
-  // Horizontal dominant
   if (Math.abs(dx) >= Math.abs(dy)) {
     exitSide  = dx > 0 ? 'right' : 'left';
     entrySide = dx > 0 ? 'left'  : 'right';
@@ -482,20 +528,18 @@ function orthoRoute(fn, tn) {
     entrySide = dy > 0 ? 'top'    : 'bottom';
   }
 
-  // Edge midpoints
-  const edgePt = (node, side) => {
+  // Edge point at fraction along the side
+  const edgePt = (node, side, frac) => {
     const nw = node.w||160, nh = node.h||70;
-    const mx = node.x+nw/2, my = node.y+nh/2;
-    if (side==='right')  return { x: node.x+nw, y: my };
-    if (side==='left')   return { x: node.x,    y: my };
-    if (side==='bottom') return { x: mx, y: node.y+nh };
-    return                       { x: mx, y: node.y };
+    if (side==='right')  return { x: node.x+nw, y: node.y + nh * frac };
+    if (side==='left')   return { x: node.x,    y: node.y + nh * frac };
+    if (side==='bottom') return { x: node.x + nw * frac, y: node.y+nh };
+    return                       { x: node.x + nw * frac, y: node.y };
   };
 
-  const fp = edgePt(fn, exitSide);
-  const tp = edgePt(tn, entrySide);
+  const fp = edgePt(fn, exitSide, fromFrac);
+  const tp = edgePt(tn, entrySide, toFrac);
 
-  // Build orthogonal points
   let pts = [fp];
 
   if (exitSide === 'right' && entrySide === 'left') {
@@ -523,7 +567,6 @@ function orthoRoute(fn, tn) {
     const my = Math.min(fT, tT) - GAP;
     pts.push({ x: fp.x, y: my }, { x: tp.x, y: my });
   } else {
-    // Mixed sides: L-shape with one intermediate
     if (exitSide==='right'||exitSide==='left') {
       pts.push({ x: tp.x, y: fp.y });
     } else {
@@ -566,13 +609,13 @@ function orthoArrow(svg, pts, color, forward) {
 }
 
 // ─── Shared connection drawer ──────────────────────────────────────────────────
-function drawConnection(svg, conn, fromNode, toNode) {
+function drawConnection(svg, conn, fromNode, toNode, fromFrac = 0.5, toFrac = 0.5) {
   const isSelected = state.selectedConn === conn.id;
   const baseColor  = connStroke(conn.color || 'blue', false);
   const lineColor  = isSelected ? '#ffffff' : baseColor;
   const arrowColor = lineColor;
 
-  const { pts, exitSide, entrySide } = orthoRoute(fromNode, toNode);
+  const { pts, exitSide, entrySide } = orthoRoute(fromNode, toNode, fromFrac, toFrac);
   const d = ptsToDPath(pts);
   const fp = pts[0], tp = pts[pts.length-1];
 
@@ -730,11 +773,13 @@ function renderCanvas() {
   });
 
   // Render connections
+  const connOffsets = computeConnOffsets(dragon);
   dragon.connections.forEach(conn => {
     const fromNode = dragon.nodes.find(n => n.id === conn.from);
     const toNode = dragon.nodes.find(n => n.id === conn.to);
     if (!fromNode || !toNode) return;
-    drawConnection(svg, conn, fromNode, toNode);
+    const o = connOffsets[conn.id] || { from: 0.5, to: 0.5 };
+    drawConnection(svg, conn, fromNode, toNode, o.from, o.to);
   });
 
   // Render nodes
@@ -942,11 +987,13 @@ function renderConnections() {
   while (svg.lastChild && svg.lastChild !== defs) svg.removeChild(svg.lastChild);
   if (svgTop) svgTop.innerHTML = '';
   if (!dragon) return;
+  const offsets = computeConnOffsets(dragon);
   dragon.connections.forEach(conn => {
     const fromNode = dragon.nodes.find(n => n.id === conn.from);
     const toNode = dragon.nodes.find(n => n.id === conn.to);
     if (!fromNode || !toNode) return;
-    drawConnection(svg, conn, fromNode, toNode);
+    const o = offsets[conn.id] || { from: 0.5, to: 0.5 };
+    drawConnection(svg, conn, fromNode, toNode, o.from, o.to);
   });
 }
 
@@ -1181,15 +1228,16 @@ function exportPNG() {
   }
 
   // Draw connections using orthogonal routing
+  const pngOffsets = computeConnOffsets(dragon);
   dragon.connections.forEach(conn => {
     const fn = dragon.nodes.find(n => n.id === conn.from);
     const tn = dragon.nodes.find(n => n.id === conn.to);
     if (!fn || !tn) return;
 
-    // Offset nodes for PNG coordinate space
     const fnO = { ...fn, x: fn.x+ox, y: fn.y+oy };
     const tnO = { ...tn, x: tn.x+ox, y: tn.y+oy };
-    const { pts } = orthoRoute(fnO, tnO);
+    const o = pngOffsets[conn.id] || { from: 0.5, to: 0.5 };
+    const { pts } = orthoRoute(fnO, tnO, o.from, o.to);
 
     const cObj = CONN_COLORS.find(c => c.id === (conn.color||'blue'));
     const lineColor = cObj ? cObj.stroke : '#4a90d9';

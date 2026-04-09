@@ -95,7 +95,7 @@
           "id": "n41",
           "name": "slide",
           "cat": "其他",
-          "x": 1248,
+          "x": 1243,
           "y": 239,
           "notes": "",
           "w": 150,
@@ -105,8 +105,58 @@
           "id": "n42",
           "name": "die / slide+die",
           "cat": "死亡",
-          "x": 1216,
-          "y": 413,
+          "x": 1268,
+          "y": 417,
+          "notes": "",
+          "w": 150,
+          "h": 38
+        },
+        {
+          "id": "n55",
+          "name": "Top",
+          "cat": "其他",
+          "x": 420,
+          "y": 612,
+          "notes": "",
+          "w": 150,
+          "h": 38
+        },
+        {
+          "id": "n56",
+          "name": "T_standby",
+          "cat": "其他",
+          "x": 687,
+          "y": 612,
+          "notes": "",
+          "w": 150,
+          "h": 38
+        },
+        {
+          "id": "n57",
+          "name": "T_hit_s / T_hit_l",
+          "cat": "其他",
+          "x": 935,
+          "y": 612,
+          "notes": "",
+          "w": 150,
+          "h": 38
+        },
+        {
+          "id": "n58",
+          "name": "T_leave",
+          "cat": "其他",
+          "x": 1176,
+          "y": 553,
+          "notes": "",
+          "w": 150,
+          "h": 38
+        },
+        {
+          "id": "n59",
+          "name": "T_die",
+          "cat": "其他",
+          "x": 1177,
+          "y": 667,
           "notes": "",
           "w": 150,
           "h": 38
@@ -220,13 +270,73 @@
           "label": "",
           "dir": "forward",
           "color": "green",
-          "shape": "diamond",
+          "shape": "none",
           "samePose": false
+        },
+        {
+          "id": "c54",
+          "from": "n40",
+          "to": "n42",
+          "label": "",
+          "dir": "forward",
+          "color": "green",
+          "shape": "none",
+          "samePose": false
+        },
+        {
+          "id": "c60",
+          "from": "n38",
+          "to": "n55",
+          "label": "",
+          "dir": "forward",
+          "color": "amber",
+          "shape": "none",
+          "samePose": true
+        },
+        {
+          "id": "c61",
+          "from": "n55",
+          "to": "n56",
+          "label": "",
+          "dir": "forward",
+          "color": "amber",
+          "shape": "star4",
+          "samePose": true
+        },
+        {
+          "id": "c62",
+          "from": "n56",
+          "to": "n57",
+          "label": "",
+          "dir": "forward",
+          "color": "amber",
+          "shape": "star4",
+          "samePose": true
+        },
+        {
+          "id": "c63",
+          "from": "n57",
+          "to": "n58",
+          "label": "",
+          "dir": "forward",
+          "color": "amber",
+          "shape": "star4",
+          "samePose": true
+        },
+        {
+          "id": "c64",
+          "from": "n57",
+          "to": "n59",
+          "label": "",
+          "dir": "forward",
+          "color": "amber",
+          "shape": "star4",
+          "samePose": true
         }
       ],
       "regions": []
     }
   ],
   "activeDragon": "n32",
-  "nextId": 54
+  "nextId": 65
 }
