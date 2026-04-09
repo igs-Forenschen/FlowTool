@@ -116,6 +116,7 @@ select.modal-input { cursor: pointer; }
       <div class="sep"></div>
       <button class="btn" onclick="autoLayout()">自動排列</button>
       <div style="flex:1"></div>
+      <button class="btn" onclick="exportJSON()" title="匯出 JSON 後上傳到 GitHub，其他人開網頁就能看到">↓ 匯出 JSON</button>
       <button class="btn" onclick="shareLink()" title="產生分享連結並複製到剪貼簿">🔗 產生分享連結</button>
       <button class="btn primary" onclick="exportPNG()">↓ 匯出 PNG</button>
     </div>
@@ -1261,6 +1262,32 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// ─── Export JSON ──────────────────────────────────────────────────────────────
+function exportJSON() {
+  const data = { dragons: state.dragons, activeDragon: state.activeDragon, nextId: state.nextId };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.download = 'data.json';
+  link.href = URL.createObjectURL(blob);
+  link.click();
+  setStatus('✓ data.json 已下載，請上傳到 GitHub repo 根目錄覆蓋舊檔');
+}
+
+// ─── Auto-load from data.json (GitHub Pages) ─────────────────────────────────
+async function loadFromDataJson() {
+  try {
+    const res = await fetch('data.json?t=' + Date.now());
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (!data.dragons || !data.dragons.length) return false;
+    data.dragons.forEach(d => { if (!d.regions) d.regions = []; });
+    state.dragons = data.dragons;
+    state.activeDragon = data.activeDragon;
+    state.nextId = data.nextId || 1;
+    return true;
+  } catch(e) { return false; }
+}
+
 // ─── Share via URL Hash ───────────────────────────────────────────────────────
 function shareLink() {
   try {
@@ -1343,17 +1370,21 @@ renderCanvas = function() {
 };
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
-const loadedFromHash = loadFromHash();
-const loadedFromStorage = !loadedFromHash && loadFromStorage();
-if (!loadedFromHash && !loadedFromStorage) {
-  state.dragons.push({ id: uid(), name: 'Small Dragon', nodes: [], connections: [], regions: [] });
-  state.activeDragon = state.dragons[0].id;
-}
-renderSidebar();
-renderCanvas();
-if (loadedFromHash) setStatus('✓ 已從分享連結載入流程圖（唯讀預覽）');
-else if (loadedFromStorage) setStatus('已自動載入上次的工作內容');
-else setStatus('選取模式 — 點「貼上動作」開始新增節點');
+(async () => {
+  const fromJson    = await loadFromDataJson();
+  const fromHash    = !fromJson && loadFromHash();
+  const fromStorage = !fromJson && !fromHash && loadFromStorage();
+  if (!fromJson && !fromHash && !fromStorage) {
+    state.dragons.push({ id: uid(), name: 'Small Dragon', nodes: [], connections: [], regions: [] });
+    state.activeDragon = state.dragons[0].id;
+  }
+  renderSidebar();
+  renderCanvas();
+  if (fromJson)    setStatus('✓ 已從 data.json 載入最新流程圖');
+  else if (fromHash)    setStatus('✓ 已從分享連結載入流程圖');
+  else if (fromStorage) setStatus('已自動載入上次的工作內容');
+  else setStatus('選取模式 — 點「貼上動作」開始新增節點');
+})();
 </script>
 </body>
 </html>
