@@ -1,0 +1,1317 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dragon Flow — 動作流程編輯器</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif; background: #1a1a22; color: #e2e0d8; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+
+/* Layout */
+#app { display: flex; flex: 1; overflow: hidden; }
+
+/* Sidebar */
+#sidebar { width: 200px; min-width: 200px; background: #12121a; border-right: 1px solid #2a2a38; display: flex; flex-direction: column; }
+#sidebar-header { padding: 14px 12px 10px; border-bottom: 1px solid #2a2a38; }
+#sidebar-header h2 { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #666; margin-bottom: 10px; }
+#dragon-list { flex: 1; overflow-y: auto; padding: 8px; }
+.dragon-item { padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; margin-bottom: 3px; display: flex; align-items: center; gap: 6px; color: #aaa; transition: all 0.15s; }
+.dragon-item:hover { background: #1e1e2e; color: #e2e0d8; }
+.dragon-item.active { background: #1e3a5f; color: #7eb8f0; }
+.dragon-item .di-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dragon-item .di-del { opacity: 0; font-size: 14px; color: #666; cursor: pointer; flex-shrink: 0; }
+.dragon-item:hover .di-del { opacity: 1; }
+.dragon-item .di-del:hover { color: #e06060; }
+#legend { padding: 10px 12px; border-top: 1px solid #2a2a38; }
+#legend h3 { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #555; margin-bottom: 8px; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #888; margin-bottom: 4px; }
+.legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+
+/* Toolbar */
+#toolbar { background: #12121a; border-bottom: 1px solid #2a2a38; padding: 8px 14px; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.btn { font-size: 12px; padding: 5px 12px; border-radius: 6px; border: 1px solid #333; background: #1e1e2e; color: #ccc; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+.btn:hover { background: #252535; color: #e2e0d8; border-color: #444; }
+.btn.active { background: #1e3a5f; color: #7eb8f0; border-color: #2a5080; }
+.btn.primary { background: #1e3a5f; color: #7eb8f0; border-color: #2a5080; }
+.btn.danger { background: #3a1e1e; color: #f07070; border-color: #5a2a2a; }
+.sep { width: 1px; height: 20px; background: #2a2a38; margin: 0 2px; }
+
+/* Canvas */
+#canvas-wrap { flex: 1; position: relative; overflow: hidden; background: #14141e; cursor: default; }
+#grid-bg { position: absolute; inset: 0; background-image: radial-gradient(circle, #2a2a38 1px, transparent 1px); background-size: 28px 28px; pointer-events: none; }
+#svg-conn { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+#svg-conn path.conn-hit { pointer-events: stroke; cursor: pointer; }
+#canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+/* Nodes */
+.node { position: absolute; border-radius: 8px; border: 1.5px solid; cursor: grab; user-select: none; min-width: 150px; max-width: 200px; transition: box-shadow 0.12s; }
+.node:active { cursor: grabbing; }
+.node.selected { outline: 2px solid #7eb8f0; outline-offset: 2px; }
+.node.connect-src { outline: 2px solid #5dcaa5; outline-offset: 2px; cursor: crosshair; }
+.node-cat { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; padding: 6px 10px 4px; border-radius: 6px 6px 0 0; }
+.node-body { padding: 6px 10px 8px; }
+.node-name { font-size: 11px; font-family: 'Consolas', 'Courier New', monospace; line-height: 1.4; word-break: break-all; }
+.node-notes { font-size: 10px; margin-top: 4px; opacity: 0.7; font-style: italic; }
+
+/* Status bar */
+#statusbar { background: #12121a; border-top: 1px solid #2a2a38; padding: 4px 14px; font-size: 11px; color: #555; flex-shrink: 0; }
+
+/* Modal */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; z-index: 500; }
+.modal-box { background: #1a1a26; border: 1px solid #333; border-radius: 12px; padding: 22px; width: 360px; }
+.modal-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; color: #e2e0d8; }
+.modal-label { font-size: 11px; color: #888; margin-bottom: 5px; display: block; }
+.modal-input { width: 100%; background: #12121a; border: 1px solid #333; border-radius: 6px; padding: 8px 10px; color: #e2e0d8; font-size: 13px; font-family: inherit; outline: none; }
+.modal-input:focus { border-color: #2a5080; }
+textarea.modal-input { resize: none; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; }
+select.modal-input { cursor: pointer; }
+.modal-actions { display: flex; gap: 8px; margin-top: 18px; justify-content: flex-end; }
+.radio-group { display: flex; gap: 14px; margin-top: 6px; }
+.radio-group label { font-size: 13px; color: #ccc; display: flex; align-items: center; gap: 5px; cursor: pointer; }
+
+/* Main area */
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+/* Add dragon input inline */
+#add-dragon-wrap { display: flex; gap: 6px; margin-top: 8px; }
+#add-dragon-wrap input { flex: 1; background: #1e1e2e; border: 1px solid #333; border-radius: 5px; padding: 5px 8px; color: #e2e0d8; font-size: 12px; outline: none; }
+#add-dragon-wrap input:focus { border-color: #2a5080; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <h2>龍角色</h2>
+      <div id="add-dragon-wrap">
+        <input type="text" id="new-dragon-name" placeholder="龍的名稱" onkeydown="if(event.key==='Enter')addDragon()"/>
+        <button class="btn primary" onclick="addDragon()">+</button>
+      </div>
+    </div>
+    <div id="dragon-list"></div>
+    <div id="legend">
+      <h3>類型色碼</h3>
+      <div id="legend-items"></div>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div id="main">
+    <div id="toolbar">
+      <button id="btn-select" class="btn active" onclick="setMode('select')" title="選取 / 移動節點">▣ 選取</button>
+      <button id="btn-connect" class="btn" onclick="setMode('connect')" title="點兩個節點建立連線">⇢ 連線</button>
+      <button id="btn-region" class="btn" onclick="setMode('region')" title="拖拉框選範圍，建立情境標籤">⬚ 框選情境</button>
+      <div class="sep"></div>
+      <button class="btn" onclick="showImport()">貼上動作</button>
+      <button class="btn" onclick="copyNode()" title="複製選取的節點 (Ctrl+D)">複製節點</button>
+      <button class="btn" onclick="clearCanvas()">清除畫布</button>
+      <div class="sep"></div>
+      <button class="btn" onclick="autoLayout()">自動排列</button>
+      <div style="flex:1"></div>
+      <button class="btn primary" onclick="exportPNG()">↓ 匯出 PNG</button>
+    </div>
+
+    <div id="canvas-wrap">
+      <div id="grid-bg"></div>
+      <svg id="svg-conn"><defs id="svg-defs"></defs></svg>
+      <div id="regions-layer"></div>
+      <div id="canvas"></div>
+      <div id="region-draft" style="display:none;position:absolute;border:2px dashed #7eb8f0;border-radius:6px;background:rgba(126,184,240,0.08);pointer-events:none;"></div>
+    </div>
+
+    <div id="statusbar">選取模式 — 拖曳節點移動，雙擊節點編輯，在連線上點擊可以編輯</div>
+  </div>
+</div>
+
+<!-- Confirm Modal -->
+<div id="modal-confirm" class="modal-overlay" style="display:none">
+  <div class="modal-box" style="width:300px">
+    <div class="modal-title" id="confirm-msg">確定嗎？</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="hideModal('modal-confirm')">取消</button>
+      <button class="btn danger" id="confirm-ok-btn" onclick="confirmResolve(true)">確定</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import Modal -->
+<div id="modal-import" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">貼上動作名稱</div>
+    <label class="modal-label">每行一個動作名稱（系統會自動偵測類型）</label>
+    <textarea class="modal-input" id="import-text" rows="10" placeholder="Small_Dragon_Idle_01.Animation&#10;Small_Dragon_Fly_02.Animation&#10;Small_Dragon_Attack_01.Animation&#10;Small_Dragon_Die_01.Animation"></textarea>
+    <div class="modal-actions">
+      <button class="btn" onclick="hideModal('modal-import')">取消</button>
+      <button class="btn primary" onclick="importActions()">生成節點</button>
+    </div>
+  </div>
+</div>
+
+<!-- New Connection Modal -->
+<div id="modal-conn" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">建立連線</div>
+    <div style="margin-bottom:14px">
+      <label class="modal-label">情境說明（選填）</label>
+      <input type="text" class="modal-input" id="conn-label" placeholder="例：玩家靠近、HP &lt; 30%、動畫結束後"/>
+    </div>
+    <div>
+      <label class="modal-label">箭頭方向</label>
+      <div class="radio-group">
+        <label><input type="radio" name="conn-dir" value="forward" checked> A → B</label>
+        <label><input type="radio" name="conn-dir" value="backward"> A ← B</label>
+        <label><input type="radio" name="conn-dir" value="both"> A ⇄ B</label>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="cancelConnect()">取消</button>
+      <button class="btn primary" onclick="confirmConnect()">建立連線</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Node Modal -->
+<div id="modal-node" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">編輯節點</div>
+    <div style="margin-bottom:12px">
+      <label class="modal-label">動作名稱</label>
+      <input type="text" class="modal-input" id="node-edit-name"/>
+    </div>
+    <div style="margin-bottom:12px">
+      <label class="modal-label">類別</label>
+      <select class="modal-input" id="node-edit-cat"></select>
+    </div>
+    <div style="margin-bottom:4px">
+      <label class="modal-label">備註（動畫時長、是否可中斷、優先權等）</label>
+      <textarea class="modal-input" id="node-edit-notes" rows="3" placeholder="例：2.4s, 不可中斷, 優先權 3"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn danger" onclick="deleteNode()">刪除節點</button>
+      <div style="flex:1"></div>
+      <button class="btn" onclick="hideModal('modal-node')">取消</button>
+      <button class="btn primary" onclick="saveNode()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Connection Modal -->
+<div id="modal-conn-edit" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">編輯連線</div>
+    <div style="margin-bottom:14px">
+      <label class="modal-label">情境說明</label>
+      <input type="text" class="modal-input" id="conn-edit-label"/>
+    </div>
+    <div>
+      <label class="modal-label">箭頭方向</label>
+      <div class="radio-group">
+        <label><input type="radio" name="conn-edit-dir" value="forward"> A → B</label>
+        <label><input type="radio" name="conn-edit-dir" value="backward"> A ← B</label>
+        <label><input type="radio" name="conn-edit-dir" value="both"> A ⇄ B</label>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn danger" onclick="deleteConn()">刪除連線</button>
+      <div style="flex:1"></div>
+      <button class="btn" onclick="hideModal('modal-conn-edit')">取消</button>
+      <button class="btn primary" onclick="saveConn()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Region Name Modal -->
+<div id="modal-region" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">建立情境區域</div>
+    <div style="margin-bottom:14px">
+      <label class="modal-label">情境名稱</label>
+      <input type="text" class="modal-input" id="region-label" placeholder="例：空中追擊階段、受傷後反應、待機循環"/>
+    </div>
+    <div style="margin-bottom:16px">
+      <label class="modal-label">顏色</label>
+      <div id="region-color-picker" style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="hideModal('modal-region')">取消</button>
+      <button class="btn primary" onclick="saveRegion()">建立</button>
+    </div>
+  </div>
+</div>
+
+<!-- Region Edit Modal -->
+<div id="modal-region-edit" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">編輯情境區域</div>
+    <div style="margin-bottom:14px">
+      <label class="modal-label">情境名稱</label>
+      <input type="text" class="modal-input" id="region-edit-label"/>
+    </div>
+    <div style="margin-bottom:16px">
+      <label class="modal-label">顏色</label>
+      <div id="region-edit-color-picker" style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn danger" onclick="deleteRegion()">刪除區域</button>
+      <div style="flex:1"></div>
+      <button class="btn" onclick="hideModal('modal-region-edit')">取消</button>
+      <button class="btn primary" onclick="saveRegionEdit()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Custom confirm (replaces browser confirm() which is blocked in file://) ──
+let _confirmCb = null;
+function customConfirm(msg, okLabel, cb) {
+  document.getElementById('confirm-msg').textContent = msg;
+  document.getElementById('confirm-ok-btn').textContent = okLabel || '確定';
+  _confirmCb = cb;
+  showModal('modal-confirm');
+}
+function confirmResolve(ok) {
+  hideModal('modal-confirm');
+  if (ok && _confirmCb) _confirmCb();
+  _confirmCb = null;
+}
+
+// ─── Region Colors ────────────────────────────────────────────────────────────
+const REGION_COLORS = [
+  { id: 'blue',   bg: 'rgba(30,80,140,0.18)',  border: '#2a5a9a', text: '#7eb8f0' },
+  { id: 'green',  bg: 'rgba(20,100,60,0.18)',  border: '#2a7a4a', text: '#5dcaa5' },
+  { id: 'amber',  bg: 'rgba(140,90,10,0.18)',  border: '#8a6010', text: '#fac775' },
+  { id: 'coral',  bg: 'rgba(140,50,30,0.18)',  border: '#8a3a20', text: '#f0997b' },
+  { id: 'purple', bg: 'rgba(80,50,160,0.18)',  border: '#5a3aaa', text: '#afa9ec' },
+  { id: 'pink',   bg: 'rgba(140,40,80,0.18)',  border: '#8a2a50', text: '#ed93b1' },
+];
+
+// ─── Data ───────────────────────────────────────────────────────────────────
+const CATS = {
+  '待機': { bg: '#1e2e1e', border: '#3a5c3a', text: '#7dc88a', label: '#5a9a5a' },
+  '移動': { bg: '#1a2a3a', border: '#2a4a6a', text: '#7eb8f0', label: '#4a80b8' },
+  '飛行': { bg: '#1a2e2e', border: '#2a5050', text: '#5dcaa5', label: '#3a8a7a' },
+  '攻擊': { bg: '#2e1e1a', border: '#5a2a1a', text: '#f0997b', label: '#c05a30' },
+  '受傷': { bg: '#2e2614', border: '#5a4810', text: '#fac775', label: '#c07010' },
+  '死亡': { bg: '#222228', border: '#3a3a44', text: '#888898', label: '#555568' },
+  '出現': { bg: '#1e1a30', border: '#3a2a60', text: '#afa9ec', label: '#6a60c0' },
+  '吼叫': { bg: '#2e1a22', border: '#5a2a40', text: '#ed93b1', label: '#b05070' },
+  '其他': { bg: '#1e1e24', border: '#333340', text: '#999aaa', label: '#555566' },
+};
+
+let state = {
+  dragons: [],
+  activeDragon: null,
+  mode: 'select',
+  connectFrom: null,
+  pendingConn: null,
+  selectedNode: null,
+  selectedConn: null,
+  selectedRegion: null,
+  editingNode: null,
+  editingConn: null,
+  editingRegion: null,
+  dragging: null,
+  regionDraft: null,      // { x, y, w, h } while dragging
+  pendingRegion: null,    // { x, y, w, h } waiting for name
+  selectedRegionColor: 'blue',
+  nextId: 1,
+};
+
+function uid() { return 'n' + (state.nextId++); }
+function cid() { return 'c' + (state.nextId++); }
+
+function getDragon() {
+  return state.dragons.find(d => d.id === state.activeDragon) || null;
+}
+
+// ─── Category Detection ──────────────────────────────────────────────────────
+function detectCat(name) {
+  const n = name.toLowerCase();
+  if (/\b(idle|stand|rest|wait|loop)\b/.test(n)) return '待機';
+  if (/\b(walk|run|move|dash|sprint|trot)\b/.test(n)) return '移動';
+  if (/\b(fly|glide|soar|hover|flight|flap)\b/.test(n)) return '飛行';
+  if (/\b(attack|atk|bite|claw|slash|breath|spit|charge|strike|swipe)\b/.test(n)) return '攻擊';
+  if (/\b(hurt|hit|damage|stagger|flinch|knockback)\b/.test(n)) return '受傷';
+  if (/\b(die|death|dead|kill|defeat)\b/.test(n)) return '死亡';
+  if (/\b(spawn|appear|emerge|enter|intro|birth)\b/.test(n)) return '出現';
+  if (/\b(roar|shout|scream|cry|howl)\b/.test(n)) return '吼叫';
+  return '其他';
+}
+
+// ─── Edge-point helper ────────────────────────────────────────────────────────
+function nodeEdgePoint(node, toX, toY) {
+  const hw = (node.w || 160) / 2, hh = (node.h || 70) / 2;
+  const cx = node.x + hw, cy = node.y + hh;
+  const dx = toX - cx, dy = toY - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  const scaleX = hw / Math.abs(dx), scaleY = hh / Math.abs(dy);
+  const scale = Math.min(scaleX, scaleY);
+  return { x: cx + dx * scale, y: cy + dy * scale };
+}
+
+// ─── Arrow triangle helper ────────────────────────────────────────────────────
+function svgCircle(svg, x, y, r, color) {
+  const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  c.setAttribute('cx', x.toFixed(1)); c.setAttribute('cy', y.toFixed(1));
+  c.setAttribute('r', r); c.setAttribute('fill', color);
+  c.style.pointerEvents = 'none';
+  svg.appendChild(c);
+}
+function svgArrow(svg, x, y, angle, color) {
+  const S = 15; // size
+  const W = 0.42; // half-spread in radians
+  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  const tip  = `${x.toFixed(1)},${y.toFixed(1)}`;
+  const l1   = `${(x - S*Math.cos(angle-W)).toFixed(1)},${(y - S*Math.sin(angle-W)).toFixed(1)}`;
+  const l2   = `${(x - S*Math.cos(angle+W)).toFixed(1)},${(y - S*Math.sin(angle+W)).toFixed(1)}`;
+  poly.setAttribute('points', `${tip} ${l1} ${l2}`);
+  poly.setAttribute('fill', color);
+  poly.style.pointerEvents = 'none';
+  svg.appendChild(poly);
+}
+
+// ─── Shared connection drawer ──────────────────────────────────────────────────
+function drawConnection(svg, conn, fromNode, toNode) {
+  const fcx = fromNode.x + (fromNode.w||160)/2, fcy = fromNode.y + (fromNode.h||70)/2;
+  const tcx = toNode.x + (toNode.w||160)/2,     tcy = toNode.y + (toNode.h||70)/2;
+
+  // Edge-to-edge endpoints
+  const fp = nodeEdgePoint(fromNode, tcx, tcy);
+  const tp = nodeEdgePoint(toNode,   fcx, fcy);
+
+  // Bezier control points (horizontal pull)
+  const dx = tp.x - fp.x, dy = tp.y - fp.y;
+  const pull = Math.min(Math.abs(dx) * 0.45, 120);
+  const cx1 = fp.x + pull, cy1 = fp.y;
+  const cx2 = tp.x - pull, cy2 = tp.y;
+
+  const d = `M ${fp.x} ${fp.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${tp.x} ${tp.y}`;
+
+  const isSelected = state.selectedConn === conn.id;
+  const lineColor  = isSelected ? '#7eb8f0' : '#4a6888';
+  const arrowColor = isSelected ? '#7eb8f0' : '#6a9ac0';
+
+  // Hit area (wide invisible stroke for easy clicking)
+  const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  hit.setAttribute('d', d);
+  hit.setAttribute('stroke', 'transparent');
+  hit.setAttribute('stroke-width', '14');
+  hit.setAttribute('fill', 'none');
+  hit.style.pointerEvents = 'stroke';
+  hit.style.cursor = 'pointer';
+  hit.onclick = () => openConnEdit(conn.id);
+  svg.appendChild(hit);
+
+  // Visible bezier line
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', d);
+  path.setAttribute('stroke', lineColor);
+  path.setAttribute('stroke-width', isSelected ? '2.5' : '2');
+  path.setAttribute('fill', 'none');
+  path.style.pointerEvents = 'none';
+  svg.appendChild(path);
+
+  // ── Arrowheads at curve midpoint (t=0.5), using bezier tangent ──
+  // Cubic bezier position and tangent at parameter t
+  function bzPt(t) {
+    const mt = 1 - t;
+    return {
+      x: mt*mt*mt*fp.x + 3*mt*mt*t*cx1 + 3*mt*t*t*cx2 + t*t*t*tp.x,
+      y: mt*mt*mt*fp.y + 3*mt*mt*t*cy1 + 3*mt*t*t*cy2 + t*t*t*tp.y,
+    };
+  }
+  function bzTan(t) {
+    const mt = 1 - t;
+    return {
+      x: 3*(mt*mt*(cx1-fp.x) + 2*mt*t*(cx2-cx1) + t*t*(tp.x-cx2)),
+      y: 3*(mt*mt*(cy1-fp.y) + 2*mt*t*(cy2-cy1) + t*t*(tp.y-cy2)),
+    };
+  }
+
+  if (conn.dir === 'forward') {
+    const pt = bzPt(0.5), tan = bzTan(0.5);
+    const angle = Math.atan2(tan.y, tan.x);
+    svgCircle(svg, pt.x, pt.y, 10, '#1a2a38');
+    svgArrow(svg, pt.x, pt.y, angle, arrowColor);
+  } else if (conn.dir === 'backward') {
+    const pt = bzPt(0.5), tan = bzTan(0.5);
+    const angle = Math.atan2(-tan.y, -tan.x);
+    svgCircle(svg, pt.x, pt.y, 10, '#1a2a38');
+    svgArrow(svg, pt.x, pt.y, angle, arrowColor);
+  } else if (conn.dir === 'both') {
+    const ptF = bzPt(0.42), tanF = bzTan(0.42);
+    const ptB = bzPt(0.58), tanB = bzTan(0.58);
+    svgCircle(svg, ptF.x, ptF.y, 10, '#1a2a38');
+    svgArrow(svg, ptF.x, ptF.y, Math.atan2(tanF.y, tanF.x), arrowColor);
+    svgCircle(svg, ptB.x, ptB.y, 10, '#1a2a38');
+    svgArrow(svg, ptB.x, ptB.y, Math.atan2(-tanB.y, -tanB.x), arrowColor);
+  }
+
+  // Label: placed at bezier midpoint, offset perpendicular so it doesn't cover arrow
+  const midPt  = bzPt(0.5);
+  const midTan = bzTan(0.5);
+  const tanLen = Math.hypot(midTan.x, midTan.y) || 1;
+  // Perpendicular offset (above the line)
+  const perpX = -midTan.y / tanLen * 32;
+  const perpY =  midTan.x / tanLen * 32;
+  const lx = midPt.x + perpX, ly = midPt.y + perpY;
+  if (conn.label) {
+    const bgW = conn.label.length * 6.5 + 14;
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('x', lx - bgW/2); bg.setAttribute('y', ly - 13);
+    bg.setAttribute('width', bgW);    bg.setAttribute('height', 17);
+    bg.setAttribute('fill', '#12121a'); bg.setAttribute('rx', 4);
+    bg.style.pointerEvents = 'none';
+    svg.appendChild(bg);
+    const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    textEl.setAttribute('x', lx); textEl.setAttribute('y', ly);
+    textEl.setAttribute('text-anchor', 'middle'); textEl.setAttribute('font-size', '11');
+    textEl.setAttribute('fill', '#7eb8f0');
+    textEl.setAttribute('font-family', 'Segoe UI, sans-serif');
+    textEl.style.pointerEvents = 'none';
+    textEl.textContent = conn.label;
+    svg.appendChild(textEl);
+  }
+}
+
+
+function renderSidebar() {
+  const list = document.getElementById('dragon-list');
+  list.innerHTML = '';
+  state.dragons.forEach(d => {
+    const div = document.createElement('div');
+    div.className = 'dragon-item' + (d.id === state.activeDragon ? ' active' : '');
+    div.innerHTML = `<span class="di-name" title="${d.name}">${d.name}</span><span class="di-del" onclick="deleteDragon('${d.id}',event)" title="刪除">✕</span>`;
+    div.onclick = (e) => { if (!e.target.classList.contains('di-del')) setActiveDragon(d.id); };
+    list.appendChild(div);
+  });
+
+  // Legend
+  const leg = document.getElementById('legend-items');
+  leg.innerHTML = '';
+  Object.entries(CATS).forEach(([name, c]) => {
+    leg.innerHTML += `<div class="legend-item"><div class="legend-dot" style="background:${c.border}"></div><span>${name}</span></div>`;
+  });
+}
+
+function renderCanvas() {
+  const dragon = getDragon();
+  const canvas = document.getElementById('canvas');
+  const svg = document.getElementById('svg-conn');
+
+  // Clear
+  canvas.innerHTML = '';
+  // Keep defs, clear rest
+  const defs = svg.querySelector('defs');
+  svg.innerHTML = '';
+  svg.appendChild(defs);
+
+  if (!dragon) {
+    canvas.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#444;font-size:14px;">← 選擇或新增龍角色<br><span style="font-size:12px;margin-top:6px;display:block">然後點「貼上動作」新增節點</span></div>';
+    return;
+  }
+
+  if (dragon.nodes.length === 0 && (!dragon.regions || dragon.regions.length === 0)) {
+    canvas.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#444;font-size:14px;">點「貼上動作」新增節點</div>';
+  }
+
+  // Render regions (background labeled boxes)
+  const rLayer = document.getElementById('regions-layer');
+  rLayer.innerHTML = '';
+  (dragon.regions || []).forEach(region => {
+    const rc = REGION_COLORS.find(c => c.id === region.color) || REGION_COLORS[0];
+    const div = document.createElement('div');
+    const isSelR = state.selectedRegion === region.id;
+    div.style.cssText = `position:absolute;left:${region.x}px;top:${region.y}px;width:${region.w}px;height:${region.h}px;
+      background:${rc.bg};border:2px ${isSelR ? 'solid' : 'dashed'} ${rc.border};border-radius:10px;box-sizing:border-box;cursor:pointer;`;
+    // Label tag at top-left
+    const tag = document.createElement('div');
+    tag.style.cssText = `position:absolute;top:-1px;left:12px;background:${rc.border};color:${rc.text};
+      font-size:11px;font-weight:600;padding:2px 10px 3px;border-radius:0 0 6px 6px;letter-spacing:0.04em;white-space:nowrap;`;
+    tag.textContent = region.label;
+    div.appendChild(tag);
+    div.addEventListener('click', e => { e.stopPropagation(); openRegionEdit(region.id); });
+    // Make region draggable
+    div.addEventListener('mousedown', e => { if (state.mode === 'select') onRegionMousedown(e, region.id); });
+    rLayer.appendChild(div);
+  });
+
+  // Render connections
+  dragon.connections.forEach(conn => {
+    const fromNode = dragon.nodes.find(n => n.id === conn.from);
+    const toNode = dragon.nodes.find(n => n.id === conn.to);
+    if (!fromNode || !toNode) return;
+    drawConnection(svg, conn, fromNode, toNode);
+  });
+
+  // Render nodes
+  dragon.nodes.forEach(node => {
+    const cat = CATS[node.cat] || CATS['其他'];
+    const div = document.createElement('div');
+    div.className = 'node' + (state.selectedNode === node.id ? ' selected' : '') + (state.connectFrom === node.id ? ' connect-src' : '');
+    div.id = 'node-' + node.id;
+    div.style.left = node.x + 'px';
+    div.style.top = node.y + 'px';
+    div.style.background = cat.bg;
+    div.style.borderColor = cat.border;
+
+    div.innerHTML = `
+      <div class="node-cat" style="color:${cat.label};border-bottom:1px solid ${cat.border}">${node.cat}</div>
+      <div class="node-body">
+        <div class="node-name" style="color:${cat.text}">${node.name}</div>
+        ${node.notes ? `<div class="node-notes" style="color:${cat.label}">${node.notes}</div>` : ''}
+      </div>`;
+
+    div.addEventListener('mousedown', e => onNodeMousedown(e, node.id));
+    div.addEventListener('dblclick', e => { e.stopPropagation(); openNodeEdit(node.id); });
+    canvas.appendChild(div);
+
+    // Measure actual size after render
+    requestAnimationFrame(() => {
+      node.w = div.offsetWidth;
+      node.h = div.offsetHeight;
+    });
+  });
+}
+
+// ─── Dragon Management ────────────────────────────────────────────────────────
+function addDragon() {
+  const inp = document.getElementById('new-dragon-name');
+  const name = inp.value.trim() || `龍 ${state.dragons.length + 1}`;
+  const id = uid();
+  state.dragons.push({ id, name, nodes: [], connections: [], regions: [] });
+  inp.value = '';
+  setActiveDragon(id);
+}
+
+function setActiveDragon(id) {
+  state.activeDragon = id;
+  state.selectedNode = null;
+  state.selectedConn = null;
+  state.selectedRegion = null;
+  state.connectFrom = null;
+  renderSidebar();
+  renderCanvas();
+}
+
+function deleteDragon(id, e) {
+  e.stopPropagation();
+  customConfirm('確定刪除這隻龍及所有節點？', '刪除', () => {
+    state.dragons = state.dragons.filter(d => d.id !== id);
+    if (state.activeDragon === id) state.activeDragon = state.dragons[0]?.id || null;
+    renderSidebar();
+    renderCanvas();
+  });
+}
+
+// ─── Import ────────────────────────────────────────────────────────────────────
+function showImport() {
+  if (!getDragon()) { setStatus('⚠ 請先選擇或新增龍角色'); return; }
+  document.getElementById('import-text').value = '';
+  showModal('modal-import');
+}
+
+function importActions() {
+  const dragon = getDragon();
+  if (!dragon) return;
+  const text = document.getElementById('import-text').value;
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+
+  const cols = 4;
+  const startX = 40;
+  const startY = 40;
+  const padX = 180;
+  const padY = 110;
+  const startIdx = dragon.nodes.length;
+
+  lines.forEach((line, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    dragon.nodes.push({
+      id: uid(),
+      name: line,
+      cat: detectCat(line),
+      x: startX + col * padX,
+      y: startY + row * padY,
+      notes: '',
+      w: 160, h: 70,
+    });
+  });
+
+  hideModal('modal-import');
+  renderCanvas();
+  setStatus(`已生成 ${lines.length} 個節點`);
+}
+
+// ─── Mode ─────────────────────────────────────────────────────────────────────
+function setMode(mode) {
+  state.mode = mode;
+  state.connectFrom = null;
+  document.getElementById('btn-select').classList.toggle('active', mode === 'select');
+  document.getElementById('btn-connect').classList.toggle('active', mode === 'connect');
+  document.getElementById('btn-region').classList.toggle('active', mode === 'region');
+  const wrap = document.getElementById('canvas-wrap');
+  wrap.style.cursor = mode === 'connect' ? 'crosshair' : mode === 'region' ? 'crosshair' : 'default';
+  const msgs = {
+    select: '選取模式 — 拖曳節點移動，雙擊節點編輯',
+    connect: '連線模式 — 點第一個節點，再點第二個節點建立連線',
+    region: '框選情境模式 — 在畫布空白處拖拉框選範圍，然後輸入情境名稱',
+  };
+  setStatus(msgs[mode] || '');
+  renderCanvas();
+}
+
+// ─── Node Interaction ─────────────────────────────────────────────────────────
+function onNodeMousedown(e, nodeId) {
+  e.stopPropagation();
+  if (e.button !== 0) return;
+
+  if (state.mode === 'connect') {
+    handleConnectClick(nodeId);
+    return;
+  }
+
+  // Select
+  state.selectedNode = nodeId;
+  state.selectedConn = null;
+
+  // Start drag
+  const dragon = getDragon();
+  const node = dragon.nodes.find(n => n.id === nodeId);
+  state.dragging = { nodeId, startMouseX: e.clientX, startMouseY: e.clientY, startNodeX: node.x, startNodeY: node.y };
+
+  renderCanvas();
+
+  const onMove = ev => {
+    if (!state.dragging) return;
+    const dx = ev.clientX - state.dragging.startMouseX;
+    const dy = ev.clientY - state.dragging.startMouseY;
+    node.x = Math.max(0, state.dragging.startNodeX + dx);
+    node.y = Math.max(0, state.dragging.startNodeY + dy);
+    const el = document.getElementById('node-' + nodeId);
+    if (el) { el.style.left = node.x + 'px'; el.style.top = node.y + 'px'; }
+    renderConnections();
+  };
+
+  const onUp = () => {
+    state.dragging = null;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function renderConnections() {
+  const dragon = getDragon();
+  const svg = document.getElementById('svg-conn');
+  const defs = document.getElementById('svg-defs');
+  while (svg.lastChild && svg.lastChild !== defs) svg.removeChild(svg.lastChild);
+  if (!dragon) return;
+  dragon.connections.forEach(conn => {
+    const fromNode = dragon.nodes.find(n => n.id === conn.from);
+    const toNode = dragon.nodes.find(n => n.id === conn.to);
+    if (!fromNode || !toNode) return;
+    drawConnection(svg, conn, fromNode, toNode);
+  });
+}
+
+// ─── Connect ─────────────────────────────────────────────────────────────────
+function handleConnectClick(nodeId) {
+  if (!state.connectFrom) {
+    state.connectFrom = nodeId;
+    setStatus('連線模式 — 請點選第二個節點');
+    renderCanvas();
+  } else if (state.connectFrom === nodeId) {
+    state.connectFrom = null;
+    renderCanvas();
+    setStatus('連線模式 — 點第一個節點，再點第二個節點建立連線');
+  } else {
+    state.pendingConn = { from: state.connectFrom, to: nodeId };
+    state.connectFrom = null;
+    document.getElementById('conn-label').value = '';
+    document.querySelector('input[name="conn-dir"][value="forward"]').checked = true;
+    showModal('modal-conn');
+  }
+}
+
+function confirmConnect() {
+  const dragon = getDragon();
+  if (!dragon || !state.pendingConn) return;
+  const label = document.getElementById('conn-label').value.trim();
+  const dir = document.querySelector('input[name="conn-dir"]:checked').value;
+  dragon.connections.push({ id: cid(), from: state.pendingConn.from, to: state.pendingConn.to, label, dir });
+  state.pendingConn = null;
+  hideModal('modal-conn');
+  renderCanvas();
+  setStatus('連線已建立！繼續點選節點建立更多連線');
+}
+
+function cancelConnect() {
+  state.pendingConn = null;
+  state.connectFrom = null;
+  hideModal('modal-conn');
+  renderCanvas();
+}
+
+// ─── Node Edit ────────────────────────────────────────────────────────────────
+function openNodeEdit(nodeId) {
+  const dragon = getDragon();
+  const node = dragon.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  state.editingNode = nodeId;
+
+  document.getElementById('node-edit-name').value = node.name;
+  document.getElementById('node-edit-notes').value = node.notes || '';
+
+  const sel = document.getElementById('node-edit-cat');
+  sel.innerHTML = Object.keys(CATS).map(k => `<option value="${k}" ${k === node.cat ? 'selected' : ''}>${k}</option>`).join('');
+
+  showModal('modal-node');
+}
+
+function saveNode() {
+  const dragon = getDragon();
+  const node = dragon.nodes.find(n => n.id === state.editingNode);
+  if (!node) return;
+  node.name = document.getElementById('node-edit-name').value.trim() || node.name;
+  node.cat = document.getElementById('node-edit-cat').value;
+  node.notes = document.getElementById('node-edit-notes').value.trim();
+  hideModal('modal-node');
+  renderCanvas();
+}
+
+function deleteNode() {
+  customConfirm('確定刪除此節點及其所有連線？', '刪除', () => {
+    const dragon = getDragon();
+    dragon.nodes = dragon.nodes.filter(n => n.id !== state.editingNode);
+    dragon.connections = dragon.connections.filter(c => c.from !== state.editingNode && c.to !== state.editingNode);
+    state.editingNode = null;
+    hideModal('modal-node');
+    renderCanvas();
+  });
+}
+
+// ─── Connection Edit ──────────────────────────────────────────────────────────
+function openConnEdit(connId) {
+  const dragon = getDragon();
+  const conn = dragon.connections.find(c => c.id === connId);
+  if (!conn) return;
+  state.editingConn = connId;
+  state.selectedConn = connId;
+  document.getElementById('conn-edit-label').value = conn.label || '';
+  document.querySelector(`input[name="conn-edit-dir"][value="${conn.dir}"]`).checked = true;
+  showModal('modal-conn-edit');
+  renderConnections();
+}
+
+function saveConn() {
+  const dragon = getDragon();
+  const conn = dragon.connections.find(c => c.id === state.editingConn);
+  if (!conn) return;
+  conn.label = document.getElementById('conn-edit-label').value.trim();
+  conn.dir = document.querySelector('input[name="conn-edit-dir"]:checked').value;
+  state.selectedConn = null;
+  hideModal('modal-conn-edit');
+  renderCanvas();
+}
+
+function deleteConn() {
+  const dragon = getDragon();
+  if (!dragon) return;
+  dragon.connections = dragon.connections.filter(c => c.id !== state.editingConn);
+  state.editingConn = null;
+  state.selectedConn = null;
+  hideModal('modal-conn-edit');
+  renderCanvas();
+}
+
+// ─── Utilities ─────────────────────────────────────────────────────────────────
+function clearCanvas() {
+  const dragon = getDragon();
+  if (!dragon) return;
+  customConfirm('確定清除所有節點、連線和情境區域？', '清除', () => {
+    dragon.nodes = [];
+    dragon.connections = [];
+    dragon.regions = [];
+    renderCanvas();
+  });
+}
+
+function autoLayout() {
+  const dragon = getDragon();
+  if (!dragon || dragon.nodes.length === 0) return;
+
+  // Group by category
+  const groups = {};
+  dragon.nodes.forEach(n => {
+    if (!groups[n.cat]) groups[n.cat] = [];
+    groups[n.cat].push(n);
+  });
+
+  const catOrder = ['出現', '待機', '移動', '飛行', '攻擊', '受傷', '死亡', '吼叫', '其他'];
+  const cols = 4;
+  let row = 0, col = 0;
+  const padX = 185, padY = 115, startX = 30, startY = 30;
+
+  catOrder.forEach(cat => {
+    if (!groups[cat]) return;
+    groups[cat].forEach(node => {
+      node.x = startX + col * padX;
+      node.y = startY + row * padY;
+      col++;
+      if (col >= cols) { col = 0; row++; }
+    });
+  });
+
+  renderCanvas();
+}
+
+// ─── Export PNG ───────────────────────────────────────────────────────────────
+function exportPNG() {
+  const dragon = getDragon();
+  if (!dragon || dragon.nodes.length === 0) { setStatus('⚠ 沒有可匯出的節點'); return; }
+
+  // Find bounding box
+  let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
+  dragon.nodes.forEach(n => {
+    const w = n.w || 160, h = n.h || 70;
+    minX = Math.min(minX, n.x);
+    minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + w);
+    maxY = Math.max(maxY, n.y + h);
+  });
+
+  const pad = 40;
+  const W = maxX - minX + pad * 2;
+  const H = maxY - minY + pad * 2;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W * 2; canvas.height = H * 2; // 2x for retina
+  const ctx = canvas.getContext('2d');
+  ctx.scale(2, 2);
+
+  // Background
+  ctx.fillStyle = '#14141e';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.fillStyle = '#2a2a38';
+  for (let gx = 0; gx < W; gx += 28) {
+    for (let gy = 0; gy < H; gy += 28) {
+      ctx.beginPath();
+      ctx.arc(gx, gy, 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  const ox = -minX + pad, oy = -minY + pad;
+
+  // helpers for PNG export
+  function pngEdge(node, toX, toY) {
+    const hw = (node.w||160)/2, hh = (node.h||70)/2;
+    const cx = node.x + hw + ox, cy = node.y + hh + oy;
+    const dx = toX - cx, dy = toY - cy;
+    if (Math.abs(dx)<0.01 && Math.abs(dy)<0.01) return {x:cx,y:cy};
+    const s = Math.min(hw/Math.abs(dx||0.001), hh/Math.abs(dy||0.001));
+    return {x: cx+dx*s, y: cy+dy*s};
+  }
+  function pngArrow(ax, ay, angle) {
+    const S=12, W=0.38;
+    ctx.fillStyle = '#6a9ac0';
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax - S*Math.cos(angle-W), ay - S*Math.sin(angle-W));
+    ctx.lineTo(ax - S*Math.cos(angle+W), ay - S*Math.sin(angle+W));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Draw connections
+  dragon.connections.forEach(conn => {
+    const fn = dragon.nodes.find(n => n.id === conn.from);
+    const tn = dragon.nodes.find(n => n.id === conn.to);
+    if (!fn || !tn) return;
+
+    const fcx = fn.x+(fn.w||160)/2+ox, fcy = fn.y+(fn.h||70)/2+oy;
+    const tcx = tn.x+(tn.w||160)/2+ox, tcy = tn.y+(tn.h||70)/2+oy;
+    const fp = pngEdge(fn, tcx, tcy);
+    const tp = pngEdge(tn, fcx, fcy);
+    const dx = tp.x - fp.x;
+    const pull = Math.min(Math.abs(dx)*0.45, 120);
+    const cx1 = fp.x+pull, cy1 = fp.y, cx2 = tp.x-pull, cy2 = tp.y;
+
+    ctx.strokeStyle = '#3a5070';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(fp.x, fp.y);
+    ctx.bezierCurveTo(cx1, cy1, cx2, cy2, tp.x, tp.y);
+    ctx.stroke();
+
+    function pngBzPt(t){const mt=1-t;return{x:mt*mt*mt*fp.x+3*mt*mt*t*cx1+3*mt*t*t*cx2+t*t*t*tp.x,y:mt*mt*mt*fp.y+3*mt*mt*t*cy1+3*mt*t*t*cy2+t*t*t*tp.y};}
+    function pngBzTan(t){const mt=1-t;return{x:3*(mt*mt*(cx1-fp.x)+2*mt*t*(cx2-cx1)+t*t*(tp.x-cx2)),y:3*(mt*mt*(cy1-fp.y)+2*mt*t*(cy2-cy1)+t*t*(tp.y-cy2))};}
+    function pngCircle(px,py){ctx.beginPath();ctx.arc(px,py,10,0,Math.PI*2);ctx.fillStyle='#1a2a38';ctx.fill();}
+
+    if(conn.dir==='forward'){
+      const pt=pngBzPt(0.5),tan=pngBzTan(0.5);pngCircle(pt.x,pt.y);pngArrow(pt.x,pt.y,Math.atan2(tan.y,tan.x));
+    } else if(conn.dir==='backward'){
+      const pt=pngBzPt(0.5),tan=pngBzTan(0.5);pngCircle(pt.x,pt.y);pngArrow(pt.x,pt.y,Math.atan2(-tan.y,-tan.x));
+    } else if(conn.dir==='both'){
+      const ptF=pngBzPt(0.42),tanF=pngBzTan(0.42);pngCircle(ptF.x,ptF.y);pngArrow(ptF.x,ptF.y,Math.atan2(tanF.y,tanF.x));
+      const ptB=pngBzPt(0.58),tanB=pngBzTan(0.58);pngCircle(ptB.x,ptB.y);pngArrow(ptB.x,ptB.y,Math.atan2(-tanB.y,-tanB.x));
+    }
+
+    if (conn.label) {
+      const midPt=pngBzPt(0.5),midTan=pngBzTan(0.5);
+      const tl=Math.hypot(midTan.x,midTan.y)||1;
+      const lx=midPt.x+(-midTan.y/tl*32), ly=midPt.y+(midTan.x/tl*32);
+      ctx.font = '10px Segoe UI, sans-serif';
+      const lw = ctx.measureText(conn.label).width;
+      ctx.fillStyle = '#12121a';
+      ctx.fillRect(lx - lw/2 - 5, ly - 13, lw + 10, 17);
+      ctx.fillStyle = '#7eb8f0';
+      ctx.textAlign = 'center';
+      ctx.fillText(conn.label, lx, ly);
+    }
+  });
+
+  // Draw nodes
+  dragon.nodes.forEach(node => {
+    const cat = CATS[node.cat] || CATS['其他'];
+    const x = node.x + ox, y = node.y + oy;
+    const w = node.w || 160, h = node.h || 70;
+    const r = 8;
+
+    // Box
+    ctx.fillStyle = cat.bg;
+    ctx.strokeStyle = cat.border;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+    ctx.fill();
+    ctx.stroke();
+
+    // Cat header bg
+    const hh = 22;
+    ctx.fillStyle = cat.bg;
+    ctx.beginPath();
+    ctx.roundRect(x + 1, y + 1, w - 2, hh, [r - 1, r - 1, 0, 0]);
+    ctx.fill();
+
+    // Divider
+    ctx.strokeStyle = cat.border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, y + hh);
+    ctx.lineTo(x + w, y + hh);
+    ctx.stroke();
+
+    // Cat label
+    ctx.fillStyle = cat.label;
+    ctx.font = '9px Segoe UI, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(node.cat.toUpperCase(), x + 10, y + hh - 7);
+
+    // Node name
+    ctx.fillStyle = cat.text;
+    ctx.font = '11px Consolas, Courier New, monospace';
+    const words = node.name;
+    ctx.fillText(words.length > 22 ? words.slice(0, 22) + '…' : words, x + 10, y + hh + 15);
+
+    // Notes
+    if (node.notes) {
+      ctx.fillStyle = cat.label;
+      ctx.font = 'italic 9px Segoe UI, sans-serif';
+      ctx.fillText(node.notes.length > 24 ? node.notes.slice(0, 24) + '…' : node.notes, x + 10, y + hh + 30);
+    }
+  });
+
+  // Title
+  ctx.fillStyle = '#555';
+  ctx.font = '11px Segoe UI, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(dragon.name + ' — Dragon Flow', pad, H - 10);
+
+  // Download
+  const link = document.createElement('a');
+  link.download = `${dragon.name.replace(/\s/g, '_')}_flow.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+// ─── Modal ────────────────────────────────────────────────────────────────────
+function showModal(id) { document.getElementById(id).style.display = 'flex'; }
+function hideModal(id) { document.getElementById(id).style.display = 'none'; }
+
+// ─── Status ───────────────────────────────────────────────────────────────────
+function setStatus(msg) { document.getElementById('statusbar').textContent = msg; }
+
+// ─── Copy Node ────────────────────────────────────────────────────────────────
+function copyNode() {
+  const dragon = getDragon();
+  if (!dragon || !state.selectedNode) { setStatus('⚠ 請先點選一個節點再複製'); return; }
+  const src = dragon.nodes.find(n => n.id === state.selectedNode);
+  if (!src) return;
+  const copy = { ...src, id: uid(), x: src.x + 24, y: src.y + 24 };
+  dragon.nodes.push(copy);
+  state.selectedNode = copy.id;
+  renderCanvas();
+  setStatus('節點已複製！');
+}
+
+// ─── Region: render layer ─────────────────────────────────────────────────────
+function renderRegions() {
+  const dragon = getDragon();
+  const rLayer = document.getElementById('regions-layer');
+  if (!rLayer || !dragon) return;
+  rLayer.innerHTML = '';
+  (dragon.regions || []).forEach(region => {
+    const rc = REGION_COLORS.find(c => c.id === region.color) || REGION_COLORS[0];
+    const div = document.createElement('div');
+    const isSel = state.selectedRegion === region.id;
+    div.style.cssText = `position:absolute;left:${region.x}px;top:${region.y}px;width:${region.w}px;height:${region.h}px;
+      background:${rc.bg};border:2px ${isSel ? 'solid' : 'dashed'} ${rc.border};border-radius:10px;box-sizing:border-box;cursor:pointer;`;
+    const tag = document.createElement('div');
+    tag.style.cssText = `position:absolute;top:-1px;left:12px;background:${rc.border};color:${rc.text};
+      font-size:11px;font-weight:600;padding:2px 10px 3px;border-radius:0 0 6px 6px;letter-spacing:0.04em;white-space:nowrap;`;
+    tag.textContent = region.label;
+    div.appendChild(tag);
+    div.addEventListener('click', e => { e.stopPropagation(); openRegionEdit(region.id); });
+    div.addEventListener('mousedown', e => { if (state.mode === 'select') onRegionDrag(e, region.id); });
+    rLayer.appendChild(div);
+  });
+}
+
+// ─── Region: drag to move ─────────────────────────────────────────────────────
+function onRegionDrag(e, regionId) {
+  e.stopPropagation();
+  const dragon = getDragon();
+  const region = (dragon.regions || []).find(r => r.id === regionId);
+  if (!region) return;
+  state.selectedRegion = regionId;
+  const startX = e.clientX, startY = e.clientY;
+  const origX = region.x, origY = region.y;
+  renderRegions();
+  const onMove = ev => {
+    region.x = origX + ev.clientX - startX;
+    region.y = origY + ev.clientY - startY;
+    renderRegions();
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+// ─── Region: draw on canvas-wrap mousedown ────────────────────────────────────
+document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
+  if (state.mode !== 'region') return;
+  const validTargets = ['canvas-wrap', 'canvas', 'grid-bg', 'regions-layer', 'region-draft'];
+  if (!validTargets.includes(e.target.id)) return;
+
+  const wrap = document.getElementById('canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+  const startX = e.clientX - rect.left;
+  const startY = e.clientY - rect.top;
+  const draft = document.getElementById('region-draft');
+
+  const onMove = ev => {
+    const cx = ev.clientX - rect.left;
+    const cy = ev.clientY - rect.top;
+    const x = Math.min(startX, cx), y = Math.min(startY, cy);
+    const w = Math.abs(cx - startX), h = Math.abs(cy - startY);
+    draft.style.cssText = `display:block;position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;
+      border:2px dashed #7eb8f0;border-radius:6px;background:rgba(126,184,240,0.08);pointer-events:none;`;
+    state.regionDraft = { x, y, w, h };
+  };
+
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    draft.style.display = 'none';
+    if (state.regionDraft && state.regionDraft.w > 30 && state.regionDraft.h > 30) {
+      state.pendingRegion = { ...state.regionDraft };
+      state.selectedRegionColor = 'blue';
+      document.getElementById('region-label').value = '';
+      buildColorPicker('region-color-picker', false);
+      showModal('modal-region');
+      setTimeout(() => document.getElementById('region-label').focus(), 50);
+    }
+    state.regionDraft = null;
+  };
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+});
+
+// ─── Region: color picker builder ─────────────────────────────────────────────
+function buildColorPicker(containerId, isEdit) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  const selectedId = isEdit ? state.editingRegionColor : state.selectedRegionColor;
+  REGION_COLORS.forEach(rc => {
+    const btn = document.createElement('div');
+    const isSel = rc.id === selectedId;
+    btn.style.cssText = `width:28px;height:28px;border-radius:6px;cursor:pointer;box-sizing:border-box;
+      background:${rc.bg};border:2px solid ${isSel ? '#fff' : rc.border};
+      outline:${isSel ? '2px solid #7eb8f0' : 'none'};outline-offset:1px;`;
+    btn.onclick = () => {
+      if (isEdit) state.editingRegionColor = rc.id;
+      else state.selectedRegionColor = rc.id;
+      buildColorPicker(containerId, isEdit);
+    };
+    container.appendChild(btn);
+  });
+}
+
+// ─── Region: save new ─────────────────────────────────────────────────────────
+function saveRegion() {
+  const dragon = getDragon();
+  if (!dragon || !state.pendingRegion) return;
+  const label = document.getElementById('region-label').value.trim();
+  if (!label) { document.getElementById('region-label').focus(); return; }
+  if (!dragon.regions) dragon.regions = [];
+  dragon.regions.push({ id: uid(), label, color: state.selectedRegionColor, ...state.pendingRegion });
+  state.pendingRegion = null;
+  hideModal('modal-region');
+  setMode('select');
+  renderCanvas();
+}
+
+// ─── Region: edit existing ────────────────────────────────────────────────────
+function openRegionEdit(regionId) {
+  const dragon = getDragon();
+  const region = (dragon.regions || []).find(r => r.id === regionId);
+  if (!region) return;
+  state.editingRegion = regionId;
+  state.editingRegionColor = region.color;
+  state.selectedRegion = regionId;
+  document.getElementById('region-edit-label').value = region.label;
+  buildColorPicker('region-edit-color-picker', true);
+  showModal('modal-region-edit');
+}
+
+function saveRegionEdit() {
+  const dragon = getDragon();
+  const region = (dragon.regions || []).find(r => r.id === state.editingRegion);
+  if (!region) return;
+  region.label = document.getElementById('region-edit-label').value.trim() || region.label;
+  region.color = state.editingRegionColor;
+  state.editingRegion = null;
+  hideModal('modal-region-edit');
+  renderCanvas();
+}
+
+function deleteRegion() {
+  customConfirm('確定刪除此情境區域？（節點不會被刪除）', '刪除', () => {
+    const dragon = getDragon();
+    if (!dragon) return;
+    dragon.regions = (dragon.regions || []).filter(r => r.id !== state.editingRegion);
+    state.editingRegion = null;
+    state.selectedRegion = null;
+    hideModal('modal-region-edit');
+    renderCanvas();
+  });
+}
+
+// ─── Click canvas to deselect ─────────────────────────────────────────────────
+document.getElementById('canvas').addEventListener('click', e => {
+  if (e.target === document.getElementById('canvas')) {
+    state.selectedNode = null;
+    state.selectedConn = null;
+    state.selectedRegion = null;
+    if (state.mode === 'select') renderCanvas();
+  }
+});
+
+// ─── Keyboard shortcuts ───────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if ((e.ctrlKey || e.metaKey) && e.key === 'd') { e.preventDefault(); copyNode(); }
+  if (e.key === 'Escape' || e.key === 'q' || e.key === 'Q') setMode('select');
+  if (e.key === 'w' || e.key === 'W') setMode('connect');
+  if (e.key === 'g' || e.key === 'G') setMode('region');
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (state.selectedNode) {
+      const dragon = getDragon();
+      if (!dragon) return;
+      dragon.nodes = dragon.nodes.filter(n => n.id !== state.selectedNode);
+      dragon.connections = dragon.connections.filter(c => c.from !== state.selectedNode && c.to !== state.selectedNode);
+      state.selectedNode = null;
+      renderCanvas();
+    } else if (state.selectedConn) {
+      const dragon = getDragon();
+      if (!dragon) return;
+      dragon.connections = dragon.connections.filter(c => c.id !== state.selectedConn);
+      state.selectedConn = null;
+      renderCanvas();
+    }
+  }
+});
+
+// ─── Persistence (localStorage) ──────────────────────────────────────────────
+const SAVE_KEY = 'dragonflow_v1';
+
+function saveToStorage() {
+  try {
+    const data = {
+      dragons: state.dragons,
+      activeDragon: state.activeDragon,
+      nextId: state.nextId,
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch(e) {}
+}
+
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (!data.dragons || !data.dragons.length) return false;
+    // Migrate: ensure regions array exists on each dragon
+    data.dragons.forEach(d => { if (!d.regions) d.regions = []; });
+    state.dragons = data.dragons;
+    state.activeDragon = data.activeDragon;
+    state.nextId = data.nextId || 1;
+    return true;
+  } catch(e) { return false; }
+}
+
+// Auto-save: debounced 800ms after any change
+let _saveTimer = null;
+function scheduleSave() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(saveToStorage, 800);
+}
+
+// Patch renderCanvas to trigger auto-save after every render
+const _origRenderCanvas = renderCanvas;
+renderCanvas = function() {
+  _origRenderCanvas();
+  scheduleSave();
+};
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+const loaded = loadFromStorage();
+if (!loaded) {
+  state.dragons.push({ id: uid(), name: 'Small Dragon', nodes: [], connections: [], regions: [] });
+  state.activeDragon = state.dragons[0].id;
+}
+renderSidebar();
+renderCanvas();
+setStatus(loaded ? '已自動載入上次的工作內容' : '選取模式 — 點「貼上動作」開始新增節點');
+</script>
+</body>
+</html>
