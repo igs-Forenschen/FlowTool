@@ -116,6 +116,7 @@ select.modal-input { cursor: pointer; }
       <div class="sep"></div>
       <button class="btn" onclick="autoLayout()">自動排列</button>
       <div style="flex:1"></div>
+      <button class="btn" onclick="shareLink()" title="產生分享連結並複製到剪貼簿">🔗 產生分享連結</button>
       <button class="btn primary" onclick="exportPNG()">↓ 匯出 PNG</button>
     </div>
 
@@ -1260,6 +1261,43 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// ─── Share via URL Hash ───────────────────────────────────────────────────────
+function shareLink() {
+  try {
+    const data = {
+      dragons: state.dragons,
+      activeDragon: state.activeDragon,
+      nextId: state.nextId,
+    };
+    const json = JSON.stringify(data);
+    const compressed = btoa(encodeURIComponent(json));
+    const url = location.href.split('#')[0] + '#data=' + compressed;
+    navigator.clipboard.writeText(url).then(() => {
+      setStatus('✓ 分享連結已複製到剪貼簿！貼給對方就能看到你的流程圖');
+    }).catch(() => {
+      prompt('請手動複製這個連結：', url);
+    });
+  } catch(e) {
+    setStatus('⚠ 資料太大，無法產生連結，請改用匯出 PNG');
+  }
+}
+
+function loadFromHash() {
+  try {
+    const hash = location.hash;
+    if (!hash.startsWith('#data=')) return false;
+    const compressed = hash.slice(6);
+    const json = decodeURIComponent(atob(compressed));
+    const data = JSON.parse(json);
+    if (!data.dragons || !data.dragons.length) return false;
+    data.dragons.forEach(d => { if (!d.regions) d.regions = []; });
+    state.dragons = data.dragons;
+    state.activeDragon = data.activeDragon;
+    state.nextId = data.nextId || 1;
+    return true;
+  } catch(e) { return false; }
+}
+
 // ─── Persistence (localStorage) ──────────────────────────────────────────────
 const SAVE_KEY = 'dragonflow_v1';
 
@@ -1304,14 +1342,17 @@ renderCanvas = function() {
 };
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
-const loaded = loadFromStorage();
-if (!loaded) {
+const loadedFromHash = loadFromHash();
+const loadedFromStorage = !loadedFromHash && loadFromStorage();
+if (!loadedFromHash && !loadedFromStorage) {
   state.dragons.push({ id: uid(), name: 'Small Dragon', nodes: [], connections: [], regions: [] });
   state.activeDragon = state.dragons[0].id;
 }
 renderSidebar();
 renderCanvas();
-setStatus(loaded ? '已自動載入上次的工作內容' : '選取模式 — 點「貼上動作」開始新增節點');
+if (loadedFromHash) setStatus('✓ 已從分享連結載入流程圖（唯讀預覽）');
+else if (loadedFromStorage) setStatus('已自動載入上次的工作內容');
+else setStatus('選取模式 — 點「貼上動作」開始新增節點');
 </script>
 </body>
 </html>
