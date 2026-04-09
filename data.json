@@ -1,0 +1,82 @@
+{
+  "dragons": [
+    {
+      "id": "n2",
+      "name": "Small_PurpleDragon",
+      "nodes": [
+        {
+          "id": "n13",
+          "name": "Small_PurpleDragon_Death_01",
+          "cat": "其他",
+          "x": 381,
+          "y": 407,
+          "notes": "",
+          "w": 185,
+          "h": 54
+        },
+        {
+          "id": "n14",
+          "name": "Small_PurpleDragon_Death_02",
+          "cat": "其他",
+          "x": 597,
+          "y": 358,
+          "notes": "",
+          "w": 185,
+          "h": 54
+        },
+        {
+          "id": "n15",
+          "name": "Small_PurpleDragon_fly",
+          "cat": "其他",
+          "x": 54,
+          "y": 84,
+          "notes": "",
+          "w": 155,
+          "h": 54
+        },
+        {
+          "id": "n16",
+          "name": "Small_PurpleDragon_fly_02",
+          "cat": "其他",
+          "x": 379,
+          "y": 86,
+          "notes": "",
+          "w": 173,
+          "h": 54
+        },
+        {
+          "id": "n17",
+          "name": "Small_PurpleDragon_fly_eye",
+          "cat": "其他",
+          "x": 67,
+          "y": 214,
+          "notes": "",
+          "w": 179,
+          "h": 54
+        }
+      ],
+      "connections": [
+        {
+          "id": "c18",
+          "from": "n16",
+          "to": "n15",
+          "label": "待機狀態切換",
+          "dir": "both"
+        }
+      ],
+      "regions": [
+        {
+          "id": "n19",
+          "label": "常駐播放",
+          "color": "coral",
+          "x": 26,
+          "y": 189,
+          "w": 253,
+          "h": 94
+        }
+      ]
+    }
+  ],
+  "activeDragon": "n2",
+  "nextId": 20
+}
