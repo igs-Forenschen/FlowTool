@@ -28,10 +28,6 @@ body { font-family: 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
 .dragon-item .di-del { opacity: 0; font-size: 14px; color: #666; cursor: pointer; flex-shrink: 0; }
 .dragon-item:hover .di-del { opacity: 1; }
 .dragon-item .di-del:hover { color: #e06060; }
-#legend { padding: 10px 12px; border-top: 1px solid #2a2a38; }
-#legend h3 { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #555; margin-bottom: 8px; }
-.legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #888; margin-bottom: 4px; }
-.legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 
 /* Toolbar */
 #toolbar { background: #12121a; border-bottom: 1px solid #2a2a38; padding: 8px 14px; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
@@ -46,18 +42,19 @@ body { font-family: 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
 #canvas-wrap { flex: 1; position: relative; overflow: hidden; background: #14141e; cursor: default; }
 #grid-bg { position: absolute; inset: 0; background-image: radial-gradient(circle, #2a2a38 1px, transparent 1px); background-size: 28px 28px; pointer-events: none; }
 #svg-conn { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-#svg-conn path.conn-hit { pointer-events: stroke; cursor: pointer; }
-#canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+#svg-conn * { pointer-events: none; }
+#regions-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+#canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 
 /* Nodes */
-.node { position: absolute; border-radius: 8px; border: 1.5px solid; cursor: grab; user-select: none; min-width: 150px; max-width: 200px; transition: box-shadow 0.12s; }
+.node { position: absolute; border-radius: 8px; border: 1.5px solid; cursor: grab; user-select: none; min-width: 150px; max-width: 200px; transition: box-shadow 0.12s; pointer-events: auto; }
 .node:active { cursor: grabbing; }
 .node.selected { outline: 2px solid #7eb8f0; outline-offset: 2px; }
 .node.connect-src { outline: 2px solid #5dcaa5; outline-offset: 2px; cursor: crosshair; }
 .node-cat { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; padding: 6px 10px 4px; border-radius: 6px 6px 0 0; }
-.node-body { padding: 6px 10px 8px; }
-.node-name { font-size: 11px; font-family: 'Consolas', 'Courier New', monospace; line-height: 1.4; word-break: break-all; }
-.node-notes { font-size: 10px; margin-top: 4px; opacity: 0.7; font-style: italic; }
+.node-body { padding: 8px 12px 10px; }
+.node-name { font-size: 13px; font-family: 'Consolas', 'Courier New', monospace; line-height: 1.4; word-break: break-all; }
+.node-notes { font-size: 11px; margin-top: 5px; opacity: 0.7; font-style: italic; }
 
 /* Status bar */
 #statusbar { background: #12121a; border-top: 1px solid #2a2a38; padding: 4px 14px; font-size: 11px; color: #555; flex-shrink: 0; }
@@ -97,10 +94,6 @@ select.modal-input { cursor: pointer; }
       </div>
     </div>
     <div id="dragon-list"></div>
-    <div id="legend">
-      <h3>類型色碼</h3>
-      <div id="legend-items"></div>
-    </div>
   </div>
 
   <!-- Main -->
@@ -409,6 +402,7 @@ function drawConnection(svg, conn, fromNode, toNode) {
   hit.setAttribute('fill', 'none');
   hit.style.pointerEvents = 'stroke';
   hit.style.cursor = 'pointer';
+  hit.style.display = 'block';
   // Single click = select, double click = open edit modal
   hit.onclick = (e) => {
     e.stopPropagation();
@@ -505,12 +499,6 @@ function renderSidebar() {
     list.appendChild(div);
   });
 
-  // Legend
-  const leg = document.getElementById('legend-items');
-  leg.innerHTML = '';
-  Object.entries(CATS).forEach(([name, c]) => {
-    leg.innerHTML += `<div class="legend-item"><div class="legend-dot" style="background:${c.border}"></div><span>${name}</span></div>`;
-  });
 }
 
 function renderCanvas() {
@@ -575,7 +563,6 @@ function renderCanvas() {
     div.style.borderColor = cat.border;
 
     div.innerHTML = `
-      <div class="node-cat" style="color:${cat.label};border-bottom:1px solid ${cat.border}">${node.cat}</div>
       <div class="node-body">
         <div class="node-name" style="color:${cat.text}">${node.name}</div>
         ${node.notes ? `<div class="node-notes" style="color:${cat.label}">${node.notes}</div>` : ''}
@@ -1011,38 +998,18 @@ function exportPNG() {
     ctx.fill();
     ctx.stroke();
 
-    // Cat header bg
-    const hh = 22;
-    ctx.fillStyle = cat.bg;
-    ctx.beginPath();
-    ctx.roundRect(x + 1, y + 1, w - 2, hh, [r - 1, r - 1, 0, 0]);
-    ctx.fill();
-
-    // Divider
-    ctx.strokeStyle = cat.border;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x, y + hh);
-    ctx.lineTo(x + w, y + hh);
-    ctx.stroke();
-
-    // Cat label
-    ctx.fillStyle = cat.label;
-    ctx.font = '9px Segoe UI, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(node.cat.toUpperCase(), x + 10, y + hh - 7);
-
     // Node name
     ctx.fillStyle = cat.text;
-    ctx.font = '11px Consolas, Courier New, monospace';
+    ctx.font = '13px Consolas, Courier New, monospace';
+    ctx.textAlign = 'left';
     const words = node.name;
-    ctx.fillText(words.length > 22 ? words.slice(0, 22) + '…' : words, x + 10, y + hh + 15);
+    ctx.fillText(words.length > 22 ? words.slice(0, 22) + '…' : words, x + 12, y + 22);
 
     // Notes
     if (node.notes) {
       ctx.fillStyle = cat.label;
-      ctx.font = 'italic 9px Segoe UI, sans-serif';
-      ctx.fillText(node.notes.length > 24 ? node.notes.slice(0, 24) + '…' : node.notes, x + 10, y + hh + 30);
+      ctx.font = 'italic 11px Segoe UI, sans-serif';
+      ctx.fillText(node.notes.length > 26 ? node.notes.slice(0, 26) + '…' : node.notes, x + 12, y + 38);
     }
   });
 
@@ -1090,7 +1057,7 @@ function renderRegions() {
     const div = document.createElement('div');
     const isSel = state.selectedRegion === region.id;
     div.style.cssText = `position:absolute;left:${region.x}px;top:${region.y}px;width:${region.w}px;height:${region.h}px;
-      background:${rc.bg};border:2px ${isSel ? 'solid' : 'dashed'} ${rc.border};border-radius:10px;box-sizing:border-box;cursor:pointer;`;
+      background:${rc.bg};border:2px ${isSel ? 'solid' : 'dashed'} ${rc.border};border-radius:10px;box-sizing:border-box;cursor:pointer;pointer-events:auto;`;
     const tag = document.createElement('div');
     tag.style.cssText = `position:absolute;top:-1px;left:12px;background:${rc.border};color:${rc.text};
       font-size:11px;font-weight:600;padding:2px 10px 3px;border-radius:0 0 6px 6px;letter-spacing:0.04em;white-space:nowrap;`;
@@ -1274,13 +1241,15 @@ function deleteRegion() {
   });
 }
 
-// ─── Click canvas to deselect ─────────────────────────────────────────────────
-document.getElementById('canvas').addEventListener('click', e => {
-  if (e.target === document.getElementById('canvas')) {
+// ─── Click background to deselect ────────────────────────────────────────────
+document.getElementById('canvas-wrap').addEventListener('click', e => {
+  const bg = ['canvas-wrap', 'canvas', 'grid-bg'];
+  if (bg.includes(e.target.id)) {
     state.selectedNode = null;
     state.selectedConn = null;
     state.selectedRegion = null;
-    if (state.mode === 'select') renderCanvas();
+    renderConnections();
+    renderRegions();
   }
 });
 
