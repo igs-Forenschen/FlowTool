@@ -409,7 +409,16 @@ function drawConnection(svg, conn, fromNode, toNode) {
   hit.setAttribute('fill', 'none');
   hit.style.pointerEvents = 'stroke';
   hit.style.cursor = 'pointer';
-  hit.onclick = () => openConnEdit(conn.id);
+  // Single click = select, double click = open edit modal
+  hit.onclick = (e) => {
+    e.stopPropagation();
+    state.selectedConn = conn.id;
+    state.selectedNode = null;
+    state.selectedRegion = null;
+    renderConnections();
+    setStatus('已選取連線 — 按 Del 刪除，雙擊編輯');
+  };
+  hit.ondblclick = (e) => { e.stopPropagation(); openConnEdit(conn.id); };
   svg.appendChild(hit);
 
   // Visible bezier line
@@ -1087,26 +1096,64 @@ function renderRegions() {
       font-size:11px;font-weight:600;padding:2px 10px 3px;border-radius:0 0 6px 6px;letter-spacing:0.04em;white-space:nowrap;`;
     tag.textContent = region.label;
     div.appendChild(tag);
-    div.addEventListener('click', e => { e.stopPropagation(); openRegionEdit(region.id); });
+    div.addEventListener('click', e => {
+      e.stopPropagation();
+      state.selectedRegion = region.id;
+      state.selectedNode = null;
+      state.selectedConn = null;
+      renderRegions();
+      setStatus('已選取情境區域 — 雙擊編輯名稱，拖曳移動（含框內節點）');
+    });
+    div.addEventListener('dblclick', e => { e.stopPropagation(); openRegionEdit(region.id); });
     div.addEventListener('mousedown', e => { if (state.mode === 'select') onRegionDrag(e, region.id); });
     rLayer.appendChild(div);
   });
 }
 
-// ─── Region: drag to move ─────────────────────────────────────────────────────
+// ─── Region: drag to move (with contained nodes) ──────────────────────────────
 function onRegionDrag(e, regionId) {
   e.stopPropagation();
   const dragon = getDragon();
   const region = (dragon.regions || []).find(r => r.id === regionId);
   if (!region) return;
   state.selectedRegion = regionId;
+  state.selectedNode = null;
+  state.selectedConn = null;
+
+  // Find nodes fully inside the region at drag start
+  const contained = dragon.nodes.filter(n => {
+    const nw = n.w || 160, nh = n.h || 70;
+    return n.x >= region.x && n.y >= region.y &&
+           n.x + nw <= region.x + region.w &&
+           n.y + nh <= region.y + region.h;
+  });
+
   const startX = e.clientX, startY = e.clientY;
-  const origX = region.x, origY = region.y;
+  const origRegion = { x: region.x, y: region.y };
+  const origNodes = contained.map(n => ({ id: n.id, x: n.x, y: n.y }));
+
   renderRegions();
+
   const onMove = ev => {
-    region.x = origX + ev.clientX - startX;
-    region.y = origY + ev.clientY - startY;
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    region.x = origRegion.x + dx;
+    region.y = origRegion.y + dy;
+    origNodes.forEach(o => {
+      const node = dragon.nodes.find(n => n.id === o.id);
+      if (node) { node.x = o.x + dx; node.y = o.y + dy; }
+    });
+    // Update node DOM positions directly for performance
+    origNodes.forEach(o => {
+      const el = document.getElementById('node-' + o.id);
+      if (el) {
+        const node = dragon.nodes.find(n => n.id === o.id);
+        el.style.left = node.x + 'px';
+        el.style.top  = node.y + 'px';
+      }
+    });
     renderRegions();
+    renderConnections();
   };
   const onUp = () => {
     document.removeEventListener('mousemove', onMove);
