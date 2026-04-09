@@ -8,20 +8,20 @@
           "id": "n13",
           "name": "Small_PurpleDragon_Death_01",
           "cat": "其他",
-          "x": 381,
-          "y": 407,
+          "x": 416,
+          "y": 326,
           "notes": "",
-          "w": 185,
-          "h": 54
+          "w": 159,
+          "h": 62
         },
         {
           "id": "n14",
           "name": "Small_PurpleDragon_Death_02",
           "cat": "其他",
-          "x": 597,
-          "y": 358,
+          "x": 734,
+          "y": 327,
           "notes": "",
-          "w": 185,
+          "w": 157,
           "h": 54
         },
         {
@@ -38,21 +38,21 @@
           "id": "n16",
           "name": "Small_PurpleDragon_fly_02",
           "cat": "其他",
-          "x": 379,
-          "y": 86,
+          "x": 490,
+          "y": 78,
           "notes": "",
-          "w": 173,
-          "h": 54
+          "w": 131,
+          "h": 67
         },
         {
           "id": "n17",
           "name": "Small_PurpleDragon_fly_eye",
           "cat": "其他",
-          "x": 67,
-          "y": 214,
+          "x": 103,
+          "y": 342,
           "notes": "",
-          "w": 179,
-          "h": 54
+          "w": 159,
+          "h": 56
         }
       ],
       "connections": [
@@ -60,8 +60,29 @@
           "id": "c18",
           "from": "n16",
           "to": "n15",
-          "label": "待機狀態切換",
+          "label": "常駐fly、機率播放fly02",
           "dir": "both"
+        },
+        {
+          "id": "c21",
+          "from": "n15",
+          "to": "n13",
+          "label": "龍死亡就瞬切",
+          "dir": "forward"
+        },
+        {
+          "id": "c22",
+          "from": "n13",
+          "to": "n14",
+          "label": "暈眩後墜落",
+          "dir": "forward"
+        },
+        {
+          "id": "c23",
+          "from": "n16",
+          "to": "n13",
+          "label": "龍死亡就瞬切",
+          "dir": "forward"
         }
       ],
       "regions": [
@@ -69,14 +90,32 @@
           "id": "n19",
           "label": "常駐播放",
           "color": "coral",
-          "x": 26,
-          "y": 189,
+          "x": 39,
+          "y": 320,
           "w": 253,
           "h": 94
+        },
+        {
+          "id": "n20",
+          "label": "待機動作",
+          "color": "green",
+          "x": 31,
+          "y": 17,
+          "w": 649,
+          "h": 155
+        },
+        {
+          "id": "n24",
+          "label": "死亡動作",
+          "color": "pink",
+          "x": 389,
+          "y": 291,
+          "w": 529,
+          "h": 134
         }
       ]
     }
   ],
   "activeDragon": "n2",
-  "nextId": 20
+  "nextId": 25
 }
