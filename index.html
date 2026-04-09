@@ -459,7 +459,7 @@ function svgDiamond(svg, x, y, size, fill, stroke) {
 }
 
 // ─── Shared side-detection (used by offset computation AND orthoRoute) ────────
-function connSides(fn, tn) {
+function connSides(fn, tn, fromSideOverride = null, toSideOverride = null) {
   const fcx = fn.x+(fn.w||160)/2, fcy = fn.y+(fn.h||70)/2;
   const tcx = tn.x+(tn.w||160)/2, tcy = tn.y+(tn.h||70)/2;
   const dx = tcx-fcx, dy = tcy-fcy;
@@ -471,6 +471,8 @@ function connSides(fn, tn) {
     exitSide  = dy > 0 ? 'bottom' : 'top';
     entrySide = dy > 0 ? 'top'    : 'bottom';
   }
+  if (fromSideOverride) exitSide  = fromSideOverride;
+  if (toSideOverride)   entrySide = toSideOverride;
   return { exitSide, entrySide };
 }
 
@@ -481,7 +483,7 @@ function computeConnOffsets(dragon) {
     const fn = dragon.nodes.find(n => n.id === conn.from);
     const tn = dragon.nodes.find(n => n.id === conn.to);
     if (!fn || !tn) return;
-    const { exitSide, entrySide } = connSides(fn, tn);
+    const { exitSide, entrySide } = connSides(fn, tn, conn.fromSide || null, conn.toSide || null);
     const fromKey = `${conn.from}|${exitSide}`;
     const toKey   = `${conn.to}|${entrySide}`;
     if (!edgeGroups[fromKey]) edgeGroups[fromKey] = [];
@@ -509,26 +511,15 @@ function computeConnOffsets(dragon) {
 }
 
 // ─── Orthogonal routing ───────────────────────────────────────────────────────
-function orthoRoute(fn, tn, fromFrac = 0.5, toFrac = 0.5) {
+function orthoRoute(fn, tn, fromFrac = 0.5, toFrac = 0.5, fromSideOverride = null, toSideOverride = null, midOffset = null) {
   const fw = fn.w||160, fh = fn.h||70;
   const tw = tn.w||160, th = tn.h||70;
   const fL = fn.x, fR = fn.x+fw, fT = fn.y, fB = fn.y+fh;
   const tL = tn.x, tR = tn.x+tw, tT = tn.y, tB = tn.y+th;
-  const fcx = fn.x+fw/2, fcy = fn.y+fh/2;
-  const tcx = tn.x+tw/2, tcy = tn.y+th/2;
   const GAP = 18;
 
-  const dx = tcx - fcx, dy = tcy - fcy;
-  let exitSide, entrySide;
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    exitSide  = dx > 0 ? 'right' : 'left';
-    entrySide = dx > 0 ? 'left'  : 'right';
-  } else {
-    exitSide  = dy > 0 ? 'bottom' : 'top';
-    entrySide = dy > 0 ? 'top'    : 'bottom';
-  }
+  const { exitSide, entrySide } = connSides(fn, tn, fromSideOverride, toSideOverride);
 
-  // Edge point at fraction along the side
   const edgePt = (node, side, frac) => {
     const nw = node.w||160, nh = node.h||70;
     if (side==='right')  return { x: node.x+nw, y: node.y + nh * frac };
@@ -539,32 +530,31 @@ function orthoRoute(fn, tn, fromFrac = 0.5, toFrac = 0.5) {
 
   const fp = edgePt(fn, exitSide, fromFrac);
   const tp = edgePt(tn, entrySide, toFrac);
-
   let pts = [fp];
 
   if (exitSide === 'right' && entrySide === 'left') {
-    const mx = (fp.x + tp.x) / 2;
+    const mx = midOffset ?? (fp.x + tp.x) / 2;
     pts.push({ x: mx, y: fp.y }, { x: mx, y: tp.y });
   } else if (exitSide === 'left' && entrySide === 'right') {
-    const mx = (fp.x + tp.x) / 2;
+    const mx = midOffset ?? (fp.x + tp.x) / 2;
     pts.push({ x: mx, y: fp.y }, { x: mx, y: tp.y });
   } else if (exitSide === 'bottom' && entrySide === 'top') {
-    const my = (fp.y + tp.y) / 2;
+    const my = midOffset ?? (fp.y + tp.y) / 2;
     pts.push({ x: fp.x, y: my }, { x: tp.x, y: my });
   } else if (exitSide === 'top' && entrySide === 'bottom') {
-    const my = (fp.y + tp.y) / 2;
+    const my = midOffset ?? (fp.y + tp.y) / 2;
     pts.push({ x: fp.x, y: my }, { x: tp.x, y: my });
   } else if (exitSide === 'right' && entrySide === 'right') {
-    const mx = Math.max(fR, tR) + GAP;
+    const mx = midOffset ?? (Math.max(fR, tR) + GAP);
     pts.push({ x: mx, y: fp.y }, { x: mx, y: tp.y });
   } else if (exitSide === 'left' && entrySide === 'left') {
-    const mx = Math.min(fL, tL) - GAP;
+    const mx = midOffset ?? (Math.min(fL, tL) - GAP);
     pts.push({ x: mx, y: fp.y }, { x: mx, y: tp.y });
   } else if (exitSide === 'bottom' && entrySide === 'bottom') {
-    const my = Math.max(fB, tB) + GAP;
+    const my = midOffset ?? (Math.max(fB, tB) + GAP);
     pts.push({ x: fp.x, y: my }, { x: tp.x, y: my });
   } else if (exitSide === 'top' && entrySide === 'top') {
-    const my = Math.min(fT, tT) - GAP;
+    const my = midOffset ?? (Math.min(fT, tT) - GAP);
     pts.push({ x: fp.x, y: my }, { x: tp.x, y: my });
   } else {
     if (exitSide==='right'||exitSide==='left') {
@@ -615,9 +605,12 @@ function drawConnection(svg, conn, fromNode, toNode, fromFrac = 0.5, toFrac = 0.
   const lineColor  = isSelected ? '#ffffff' : baseColor;
   const arrowColor = lineColor;
 
-  const { pts, exitSide, entrySide } = orthoRoute(fromNode, toNode, fromFrac, toFrac);
+  // Build pts: use stored userPts if available, otherwise auto-route
+  const autoResult = orthoRoute(fromNode, toNode, fromFrac, toFrac, conn.fromSide || null, conn.toSide || null, conn.midOffset ?? null);
+  const { exitSide, entrySide } = autoResult;
+  const fp = autoResult.pts[0], tp = autoResult.pts[autoResult.pts.length - 1];
+  const pts = conn.userPts ? [fp, ...conn.userPts, tp] : autoResult.pts;
   const d = ptsToDPath(pts);
-  const fp = pts[0], tp = pts[pts.length-1];
 
   // Hit area
   const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -713,9 +706,80 @@ function drawConnection(svg, conn, fromNode, toNode, fromFrac = 0.5, toFrac = 0.
     textEl.textContent = conn.label;
     svg.appendChild(textEl);
   }
+  // Segment drag handles — one grip per unique visual segment (after merging collinear runs)
+  if (!state.preview) {
+    const hDominant = exitSide === 'right' || exitSide === 'left';
+
+    // Merge collinear consecutive points so two co-directional stubs become one segment
+    const simplePts = [pts[0]];
+    for (let k = 1; k < pts.length - 1; k++) {
+      const prev = simplePts[simplePts.length - 1];
+      const curr = pts[k], next = pts[k + 1];
+      const colH = Math.abs(curr.y - prev.y) < 1 && Math.abs(next.y - curr.y) < 1;
+      const colV = Math.abs(curr.x - prev.x) < 1 && Math.abs(next.x - curr.x) < 1;
+      if (!colH && !colV) simplePts.push(curr);
+    }
+    simplePts.push(pts[pts.length - 1]);
+
+    // One grip per simplified segment. Cursor perpendicular to segment.
+    for (let i = 1; i < simplePts.length; i++) {
+      const a = simplePts[i-1], b = simplePts[i];
+      const isHoriz = Math.abs(b.y - a.y) < 2;
+      const isVert  = Math.abs(b.x - a.x) < 2;
+      const segLen  = Math.hypot(b.x-a.x, b.y-a.y);
+      if (segLen < 16) continue;
+      if (!isHoriz && !isVert) continue;
+      const mx2 = (a.x+b.x)/2, my2 = (a.y+b.y)/2;
+      const cursor = isHoriz ? 'ns-resize' : 'ew-resize';
+      const segHit = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      segHit.setAttribute('x1', a.x); segHit.setAttribute('y1', a.y);
+      segHit.setAttribute('x2', b.x); segHit.setAttribute('y2', b.y);
+      segHit.setAttribute('stroke', 'transparent');
+      segHit.setAttribute('stroke-width', '16');
+      segHit.style.pointerEvents = 'stroke';
+      segHit.style.cursor = cursor;
+      const capturedI = i, capturedIsHoriz = isHoriz;
+      segHit.addEventListener('mousedown', e => {
+        e.stopPropagation();
+        startSegmentDrag(e, conn, capturedIsHoriz, capturedI, simplePts);
+      });
+      svg.appendChild(segHit);
+      const gw = isHoriz ? 20 : 8, gh = isHoriz ? 8 : 20;
+      const grip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      grip.setAttribute('x', mx2 - gw/2); grip.setAttribute('y', my2 - gh/2);
+      grip.setAttribute('width', gw); grip.setAttribute('height', gh);
+      grip.setAttribute('fill', isSelected ? '#ffffff' : lineColor);
+      grip.setAttribute('rx', '3');
+      grip.setAttribute('opacity', isSelected ? '0.9' : '0.6');
+      grip.style.pointerEvents = 'none';
+      svg.appendChild(grip);
+    }
+  }
+
+  // Endpoint drag handles (shown only when selected)
+  if (isSelected) {
+    const svgTop = document.getElementById('svg-top');
+    if (svgTop) {
+      const addHandle = (hx, hy, which) => {
+        const s = 8;
+        const h = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        h.setAttribute('x', hx - s/2); h.setAttribute('y', hy - s/2);
+        h.setAttribute('width', s); h.setAttribute('height', s);
+        h.setAttribute('fill', '#14141e'); h.setAttribute('stroke', '#ffffff');
+        h.setAttribute('stroke-width', '2'); h.setAttribute('rx', '2');
+        h.style.pointerEvents = 'auto'; h.style.cursor = 'crosshair';
+        h.addEventListener('mousedown', e => {
+          e.stopPropagation();
+          const node = which === 'from' ? fromNode : toNode;
+          startEndpointDrag(e, conn, which, node);
+        });
+        svgTop.appendChild(h);
+      };
+      addHandle(fp.x, fp.y, 'from');
+      addHandle(tp.x, tp.y, 'to');
+    }
+  }
 }
-
-
 function renderSidebar() {
   const list = document.getElementById('dragon-list');
   list.innerHTML = '';
@@ -727,6 +791,138 @@ function renderSidebar() {
     list.appendChild(div);
   });
 
+}
+
+// ─── Nearest side helper ──────────────────────────────────────────────────────
+function nearestSide(node, mx, my) {
+  const nw = node.w||160, nh = node.h||70;
+  const dRight  = Math.abs(mx - (node.x + nw));
+  const dLeft   = Math.abs(mx - node.x);
+  const dBottom = Math.abs(my - (node.y + nh));
+  const dTop    = Math.abs(my - node.y);
+  const min = Math.min(dRight, dLeft, dBottom, dTop);
+  if (min === dRight)  return 'right';
+  if (min === dLeft)   return 'left';
+  if (min === dBottom) return 'bottom';
+  return 'top';
+}
+
+function drawPortIndicators(node, activeSide) {
+  const svgTop = document.getElementById('svg-top');
+  if (!svgTop) return;
+  const nw = node.w||160, nh = node.h||70;
+  const sides = {
+    right:  { x: node.x+nw,    y: node.y+nh/2 },
+    left:   { x: node.x,       y: node.y+nh/2 },
+    bottom: { x: node.x+nw/2,  y: node.y+nh   },
+    top:    { x: node.x+nw/2,  y: node.y       },
+  };
+  Object.entries(sides).forEach(([side, pt]) => {
+    const isActive = side === activeSide;
+    const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y);
+    c.setAttribute('r', isActive ? 8 : 5);
+    c.setAttribute('fill', isActive ? '#7eb8f0' : '#2a2a3a');
+    c.setAttribute('stroke', isActive ? '#ffffff' : '#555');
+    c.setAttribute('stroke-width', '1.5');
+    c.style.pointerEvents = 'none';
+    svgTop.appendChild(c);
+  });
+}
+
+// ─── Segment drag — all segments draggable ────────────────────────────────────
+function startSegmentDrag(e, conn, isHoriz, segIdx, simplePts) {
+  e.stopPropagation();
+  const wrap = document.getElementById('canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+
+  // fp and tp are the fixed node-edge points (first/last of simplePts at drag start)
+  const fp = { x: simplePts[0].x, y: simplePts[0].y };
+  const tp = { x: simplePts[simplePts.length-1].x, y: simplePts[simplePts.length-1].y };
+
+  // Always snapshot from the CURRENT simplePts at drag start — this fixes "can't drag twice"
+  // by ensuring indices always match the currently rendered path
+  const initUserPts = simplePts.slice(1, -1).map(p => ({ x: p.x, y: p.y }));
+
+  // Indices of the dragged segment's endpoints in initUserPts:
+  //   simplePts[segIdx-1] = initUserPts[segIdx-2]  (idxA=-1 → it's fp, not in userPts)
+  //   simplePts[segIdx]   = initUserPts[segIdx-1]  (idxB=len → it's tp, not in userPts)
+  const idxA = segIdx - 2;
+  const idxB = segIdx - 1;
+
+  const onMove = ev => {
+    const cx = ev.clientX - rect.left;
+    const cy = ev.clientY - rect.top;
+
+    let newPts = initUserPts.map(p => ({ ...p }));
+
+    if (isHoriz) {
+      // Update Y of segment endpoints in userPts
+      if (idxA >= 0 && idxA < newPts.length) newPts[idxA].y = cy;
+      if (idxB >= 0 && idxB < newPts.length) newPts[idxB].y = cy;
+
+      // Segment borders fp (fixed) → insert L-bend {fp.x, cy} to avoid diagonal
+      if (idxA < 0) newPts.unshift({ x: fp.x, y: cy });
+
+      // Segment borders tp (fixed) → insert L-bend {tp.x, cy} to avoid diagonal
+      if (idxB >= initUserPts.length) newPts.push({ x: tp.x, y: cy });
+
+    } else {
+      // Update X of segment endpoints in userPts
+      if (idxA >= 0 && idxA < newPts.length) newPts[idxA].x = cx;
+      if (idxB >= 0 && idxB < newPts.length) newPts[idxB].x = cx;
+
+      // Segment borders fp → insert L-bend {cx, fp.y}
+      if (idxA < 0) newPts.unshift({ x: cx, y: fp.y });
+
+      // Segment borders tp → insert L-bend {cx, tp.y}
+      if (idxB >= initUserPts.length) newPts.push({ x: cx, y: tp.y });
+    }
+
+    conn.userPts = newPts;
+    renderConnections();
+  };
+
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    renderCanvas();
+  };
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function startEndpointDrag(e, conn, which, node) {
+  e.stopPropagation();
+  const wrap = document.getElementById('canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+
+  const onMove = ev => {
+    const mx = ev.clientX - rect.left;
+    const my = ev.clientY - rect.top;
+    const side = nearestSide(node, mx, my);
+    renderConnections();
+    drawPortIndicators(node, side);
+  };
+
+  const onUp = ev => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    const mx = ev.clientX - rect.left;
+    const my = ev.clientY - rect.top;
+    const side = nearestSide(node, mx, my);
+    if (which === 'from') conn.fromSide = side;
+    else conn.toSide = side;
+    conn.midOffset = null;
+    conn.userPts = null; // reset path on side change
+    renderCanvas();
+    const sideNames = { right:'右側', left:'左側', top:'上方', bottom:'下方' };
+    setStatus(`已設定連接口為「${sideNames[side]}」`);
+  };
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
 }
 
 function renderCanvas() {
@@ -779,7 +975,9 @@ function renderCanvas() {
     const toNode = dragon.nodes.find(n => n.id === conn.to);
     if (!fromNode || !toNode) return;
     const o = connOffsets[conn.id] || { from: 0.5, to: 0.5 };
-    drawConnection(svg, conn, fromNode, toNode, o.from, o.to);
+    const fromFrac = conn.fromFrac ?? o.from;
+    const toFrac   = conn.toFrac   ?? o.to;
+    drawConnection(svg, conn, fromNode, toNode, fromFrac, toFrac);
   });
 
   // Render nodes
@@ -918,6 +1116,15 @@ function onNodeMousedown(e, nodeId) {
   // ── Multi-select group drag ──
   if (isInMultiSelect && state.multiSelect.nodes.length > 1) {
     const nodeIds = state.multiSelect.nodes;
+
+    // Clear userPts for all connections involving any of the selected nodes
+    dragon.connections.forEach(c => {
+      if (nodeIds.includes(c.from) || nodeIds.includes(c.to)) {
+        c.userPts = null;
+        c.midOffset = null;
+      }
+    });
+
     const origPositions = nodeIds.map(id => {
       const n = dragon.nodes.find(n => n.id === id);
       return { id, x: n.x, y: n.y };
@@ -954,6 +1161,16 @@ function onNodeMousedown(e, nodeId) {
   state.multiSelect = { nodes: [], conns: [], regions: [] };
 
   const node = dragon.nodes.find(n => n.id === nodeId);
+
+  // Clear userPts for all connections involving this node so
+  // the auto-router keeps lines orthogonal while the node moves
+  dragon.connections.forEach(c => {
+    if (c.from === nodeId || c.to === nodeId) {
+      c.userPts = null;
+      c.midOffset = null;
+    }
+  });
+
   state.dragging = { nodeId, startMouseX: e.clientX, startMouseY: e.clientY, startNodeX: node.x, startNodeY: node.y };
 
   renderCanvas();
@@ -993,7 +1210,9 @@ function renderConnections() {
     const toNode = dragon.nodes.find(n => n.id === conn.to);
     if (!fromNode || !toNode) return;
     const o = offsets[conn.id] || { from: 0.5, to: 0.5 };
-    drawConnection(svg, conn, fromNode, toNode, o.from, o.to);
+    const fromFrac = conn.fromFrac ?? o.from;
+    const toFrac   = conn.toFrac   ?? o.to;
+    drawConnection(svg, conn, fromNode, toNode, fromFrac, toFrac);
   });
 }
 
@@ -1237,7 +1456,9 @@ function exportPNG() {
     const fnO = { ...fn, x: fn.x+ox, y: fn.y+oy };
     const tnO = { ...tn, x: tn.x+ox, y: tn.y+oy };
     const o = pngOffsets[conn.id] || { from: 0.5, to: 0.5 };
-    const { pts } = orthoRoute(fnO, tnO, o.from, o.to);
+    const fromFrac = conn.fromFrac ?? o.from;
+    const toFrac   = conn.toFrac   ?? o.to;
+    const { pts } = orthoRoute(fnO, tnO, fromFrac, toFrac, conn.fromSide || null, conn.toSide || null, conn.midOffset ?? null);
 
     const cObj = CONN_COLORS.find(c => c.id === (conn.color||'blue'));
     const lineColor = cObj ? cObj.stroke : '#4a90d9';
