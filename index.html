@@ -40,11 +40,11 @@ body { font-family: 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
 
 /* Canvas */
 #canvas-wrap { flex: 1; position: relative; overflow: hidden; background: #14141e; cursor: default; }
-#grid-bg { position: absolute; inset: 0; background-image: radial-gradient(circle, #2a2a38 1px, transparent 1px); background-size: 28px 28px; pointer-events: none; }
-#svg-conn { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+#grid-bg { position: absolute; inset: 0; background-image: radial-gradient(circle, #2a2a38 1px, transparent 1px); background-size: 28px 28px; pointer-events: none; z-index: 1; }
+#regions-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
+#canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
+#svg-conn { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 4; }
 #svg-conn * { pointer-events: none; }
-#regions-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-#canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 
 /* Nodes */
 .node { position: absolute; border-radius: 8px; border: 1.5px solid; cursor: grab; user-select: none; min-width: 150px; max-width: 200px; transition: box-shadow 0.12s; pointer-events: auto; }
@@ -124,12 +124,12 @@ body.preview-mode .node { cursor: default !important; }
 
     <div id="canvas-wrap">
       <div id="grid-bg"></div>
-      <svg id="svg-conn"><defs id="svg-defs"></defs></svg>
       <div id="regions-layer"></div>
       <div id="canvas"></div>
-      <svg id="svg-top" style="position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible;pointer-events:none;"></svg>
-      <div id="region-draft" style="display:none;position:absolute;border:2px dashed #7eb8f0;border-radius:6px;background:rgba(126,184,240,0.08);pointer-events:none;"></div>
-      <div id="select-rect" style="display:none;position:absolute;border:1.5px dashed #e0e0e0;border-radius:3px;background:rgba(255,255,255,0.05);pointer-events:none;"></div>
+      <svg id="svg-conn"><defs id="svg-defs"></defs></svg>
+      <svg id="svg-top" style="position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:5;"></svg>
+      <div id="region-draft" style="display:none;position:absolute;border:2px dashed #7eb8f0;border-radius:6px;background:rgba(126,184,240,0.08);pointer-events:none;z-index:6;"></div>
+      <div id="select-rect" style="display:none;position:absolute;border:1.5px dashed #e0e0e0;border-radius:3px;background:rgba(255,255,255,0.05);pointer-events:none;z-index:7;"></div>
     </div>
 
     <div id="statusbar">選取模式 — 拖曳節點移動，雙擊節點編輯，在連線上點擊可以編輯</div>
@@ -326,6 +326,26 @@ function drawPoseShape(svg, shapeId, x, y, sz, fill, stroke) {
   shape.draw(svg, x, y, sz, fill, stroke);
 }
 
+// ─── 新增：畫在正尾端的箭頭 ───
+function drawEndpointArrow(svg, x, y, angle, color, isSelected) {
+  const S = 12; // 箭頭長度
+  const W = 0.45; // 箭頭張開角度
+  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  const tip  = `${x.toFixed(1)},${y.toFixed(1)}`;
+  const l1   = `${(x - S*Math.cos(angle-W)).toFixed(1)},${(y - S*Math.sin(angle-W)).toFixed(1)}`;
+  const l2   = `${(x - S*Math.cos(angle+W)).toFixed(1)},${(y - S*Math.sin(angle+W)).toFixed(1)}`;
+  poly.setAttribute('points', `${tip} ${l1} ${l2}`);
+  poly.setAttribute('fill', color);
+  poly.setAttribute('stroke', color);
+  poly.setAttribute('stroke-width', '1.5');
+  poly.setAttribute('stroke-linejoin', 'round');
+  if (isSelected) {
+    poly.setAttribute('filter', 'drop-shadow(0px 0px 4px rgba(255,255,255,0.8))');
+  }
+  poly.style.pointerEvents = 'none';
+  svg.appendChild(poly);
+}
+
 // ─── Connection Colors ────────────────────────────────────────────────────────
 const CONN_COLORS = [
   { id: 'blue',   stroke: '#4a90d9', label: '一般流程' },
@@ -389,8 +409,9 @@ let state = {
   editingConnShape: 'diamond',
   selectedConnSamePose: false,
   editingConnSamePose: false,
-  multiSelect: { nodes: [], conns: [], regions: [] },
   nextId: 1,
+  lastClickTime: 0,
+  lastClickTarget: null,
 };
 
 function uid() { return 'n' + (state.nextId++); }
@@ -400,7 +421,6 @@ function getDragon() {
   return state.dragons.find(d => d.id === state.activeDragon) || null;
 }
 
-// ─── Category Detection ──────────────────────────────────────────────────────
 function detectCat(name) {
   const n = name.toLowerCase();
   if (/\b(idle|stand|rest|wait|loop)\b/.test(n)) return '待機';
@@ -414,51 +434,6 @@ function detectCat(name) {
   return '其他';
 }
 
-// ─── Edge-point helper ────────────────────────────────────────────────────────
-function nodeEdgePoint(node, toX, toY) {
-  const hw = (node.w || 160) / 2, hh = (node.h || 70) / 2;
-  const cx = node.x + hw, cy = node.y + hh;
-  const dx = toX - cx, dy = toY - cy;
-  if (dx === 0 && dy === 0) return { x: cx, y: cy };
-  const scaleX = hw / Math.abs(dx), scaleY = hh / Math.abs(dy);
-  const scale = Math.min(scaleX, scaleY);
-  return { x: cx + dx * scale, y: cy + dy * scale };
-}
-
-// ─── Arrow triangle helper ────────────────────────────────────────────────────
-function svgCircle(svg, x, y, r, color) {
-  const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  c.setAttribute('cx', x.toFixed(1)); c.setAttribute('cy', y.toFixed(1));
-  c.setAttribute('r', r); c.setAttribute('fill', color);
-  c.style.pointerEvents = 'none';
-  svg.appendChild(c);
-}
-function svgArrow(svg, x, y, angle, color) {
-  const S = 15; // size
-  const W = 0.42; // half-spread in radians
-  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-  const tip  = `${x.toFixed(1)},${y.toFixed(1)}`;
-  const l1   = `${(x - S*Math.cos(angle-W)).toFixed(1)},${(y - S*Math.sin(angle-W)).toFixed(1)}`;
-  const l2   = `${(x - S*Math.cos(angle+W)).toFixed(1)},${(y - S*Math.sin(angle+W)).toFixed(1)}`;
-  poly.setAttribute('points', `${tip} ${l1} ${l2}`);
-  poly.setAttribute('fill', color);
-  poly.style.pointerEvents = 'none';
-  svg.appendChild(poly);
-}
-
-// ─── Diamond (Pose marker) helper ────────────────────────────────────────────
-function svgDiamond(svg, x, y, size, fill, stroke) {
-  const s = size;
-  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-  poly.setAttribute('points', `${x},${y-s} ${x+s},${y} ${x},${y+s} ${x-s},${y}`);
-  poly.setAttribute('fill', fill);
-  poly.setAttribute('stroke', stroke);
-  poly.setAttribute('stroke-width', '1.5');
-  poly.style.pointerEvents = 'none';
-  svg.appendChild(poly);
-}
-
-// ─── Shared side-detection (used by offset computation AND orthoRoute) ────────
 function connSides(fn, tn, fromSideOverride = null, toSideOverride = null) {
   const fcx = fn.x+(fn.w||160)/2, fcy = fn.y+(fn.h||70)/2;
   const tcx = tn.x+(tn.w||160)/2, tcy = tn.y+(tn.h||70)/2;
@@ -476,47 +451,12 @@ function connSides(fn, tn, fromSideOverride = null, toSideOverride = null) {
   return { exitSide, entrySide };
 }
 
-// ─── Pre-compute edge offsets so parallel connections are spread apart ─────────
-function computeConnOffsets(dragon) {
-  const edgeGroups = {}; // `nodeId|side` -> [connId, ...]
-  dragon.connections.forEach(conn => {
-    const fn = dragon.nodes.find(n => n.id === conn.from);
-    const tn = dragon.nodes.find(n => n.id === conn.to);
-    if (!fn || !tn) return;
-    const { exitSide, entrySide } = connSides(fn, tn, conn.fromSide || null, conn.toSide || null);
-    const fromKey = `${conn.from}|${exitSide}`;
-    const toKey   = `${conn.to}|${entrySide}`;
-    if (!edgeGroups[fromKey]) edgeGroups[fromKey] = [];
-    if (!edgeGroups[toKey])   edgeGroups[toKey]   = [];
-    if (!edgeGroups[fromKey].includes(conn.id)) edgeGroups[fromKey].push(conn.id);
-    if (!edgeGroups[toKey].includes(conn.id))   edgeGroups[toKey].push(conn.id);
-  });
-
-  const offsets = {}; // connId -> { from: frac, to: frac }
-  Object.entries(edgeGroups).forEach(([key, connIds]) => {
-    const n = connIds.length;
-    const parts = key.split('|');
-    const nodeId = parts[0];
-    connIds.forEach((connId, i) => {
-      if (!offsets[connId]) offsets[connId] = { from: 0.5, to: 0.5 };
-      // Spread evenly: 1 conn → 0.5, 2 conns → 0.33/0.67, 3 → 0.25/0.5/0.75, etc.
-      const frac = (i + 1) / (n + 1);
-      const conn = dragon.connections.find(c => c.id === connId);
-      if (!conn) return;
-      if (conn.from === nodeId) offsets[connId].from = frac;
-      else offsets[connId].to = frac;
-    });
-  });
-  return offsets;
-}
-
-// ─── Orthogonal routing ───────────────────────────────────────────────────────
 function orthoRoute(fn, tn, fromFrac = 0.5, toFrac = 0.5, fromSideOverride = null, toSideOverride = null, midOffset = null) {
   const fw = fn.w||160, fh = fn.h||70;
   const tw = tn.w||160, th = tn.h||70;
   const fL = fn.x, fR = fn.x+fw, fT = fn.y, fB = fn.y+fh;
   const tL = tn.x, tR = tn.x+tw, tT = tn.y, tB = tn.y+th;
-  const GAP = 18;
+  const GAP = 24;
 
   const { exitSide, entrySide } = connSides(fn, tn, fromSideOverride, toSideOverride);
 
@@ -568,81 +508,78 @@ function orthoRoute(fn, tn, fromFrac = 0.5, toFrac = 0.5, fromSideOverride = nul
   return { pts, exitSide, entrySide };
 }
 
-function ptsToDPath(pts) {
-  return pts.map((p,i) => `${i===0?'M':'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
-}
-
-// ─── Arrow along orthogonal path ──────────────────────────────────────────────
-function orthoArrow(svg, pts, color, forward) {
-  // forward=true  → arrow on LAST segment pointing toward destination
-  // forward=false → arrow on FIRST segment pointing toward source (reverse)
-  let seg;
-  if (forward) {
-    // Last non-zero segment
-    for (let i = pts.length - 1; i >= 1; i--) {
-      const dx = pts[i].x - pts[i-1].x, dy = pts[i].y - pts[i-1].y;
-      if (Math.hypot(dx, dy) > 2) { seg = { ax: pts[i-1].x, ay: pts[i-1].y, dx, dy }; break; }
-    }
-  } else {
-    // First non-zero segment, reversed direction
-    for (let i = 1; i < pts.length; i++) {
-      const dx = pts[i-1].x - pts[i].x, dy = pts[i-1].y - pts[i].y;
-      if (Math.hypot(dx, dy) > 2) { seg = { ax: pts[i].x, ay: pts[i].y, dx, dy }; break; }
-    }
+function ptsToRoundedDPath(pts, radius = 12) {
+  if (pts.length < 2) return '';
+  let d = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const prev = pts[i - 1], curr = pts[i], next = pts[i + 1];
+    const d1 = Math.hypot(curr.x - prev.x, curr.y - prev.y);
+    const d2 = Math.hypot(next.x - curr.x, next.y - curr.y);
+    const r = Math.min(radius, d1 / 2.1, d2 / 2.1);
+    const v1 = { x: (curr.x - prev.x) / d1, y: (curr.y - prev.y) / d1 };
+    const v2 = { x: (next.x - curr.x) / d2, y: (next.y - curr.y) / d2 };
+    const p1 = { x: curr.x - v1.x * r, y: curr.y - v1.y * r };
+    const p2 = { x: curr.x + v2.x * r, y: curr.y + v2.y * r };
+    d += ` L ${p1.x} ${p1.y} Q ${curr.x} ${curr.y} ${p2.x} ${p2.y}`;
   }
-  if (!seg) return;
-  // Place arrow at midpoint of that segment
-  const mx = seg.ax + seg.dx * 0.5, my = seg.ay + seg.dy * 0.5;
-  const angle = Math.atan2(seg.dy, seg.dx);
-  svgCircle(svg, mx, my, 10, '#14141e');
-  svgArrow(svg, mx, my, angle, color);
+  d += ` L ${pts[pts.length - 1].x} ${pts[pts.length - 1].y}`;
+  return d;
 }
 
-// ─── Shared connection drawer ──────────────────────────────────────────────────
 function drawConnection(svg, conn, fromNode, toNode, fromFrac = 0.5, toFrac = 0.5) {
   const isSelected = state.selectedConn === conn.id;
   const baseColor  = connStroke(conn.color || 'blue', false);
   const lineColor  = isSelected ? '#ffffff' : baseColor;
   const arrowColor = lineColor;
 
-  // Build pts: use stored userPts if available, otherwise auto-route
   const autoResult = orthoRoute(fromNode, toNode, fromFrac, toFrac, conn.fromSide || null, conn.toSide || null, conn.midOffset ?? null);
   const { exitSide, entrySide } = autoResult;
   const fp = autoResult.pts[0], tp = autoResult.pts[autoResult.pts.length - 1];
   const pts = conn.userPts ? [fp, ...conn.userPts, tp] : autoResult.pts;
-  const d = ptsToDPath(pts);
+  const d = ptsToRoundedDPath(pts, 14);
 
-  // Hit area
+  const handleConnInteraction = (e, isSeg, isHoriz, segIdx, simplePts) => {
+    e.stopPropagation();
+    const now = Date.now();
+    const isDblClick = (now - (state.lastClickTime || 0) < 300) && (state.lastClickTarget === conn.id);
+    state.lastClickTime = now;
+    state.lastClickTarget = conn.id;
+
+    if (isDblClick) { openConnEdit(conn.id); return; }
+
+    if (state.selectedConn !== conn.id) {
+      state.selectedConn = conn.id;
+      state.selectedNode = null;
+      state.selectedRegion = null;
+      renderConnections();
+      setStatus('已選取連線 — 按 Del 刪除，拖曳線段可調整，拖曳端點圓圈重新連接');
+    }
+
+    if (isSeg) startSegmentDrag(e, conn, isHoriz, segIdx, simplePts);
+  };
+
   const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   hit.setAttribute('d', d);
   hit.setAttribute('stroke', 'transparent');
-  hit.setAttribute('stroke-width', '14');
+  hit.setAttribute('stroke-width', '18');
   hit.setAttribute('fill', 'none');
   hit.style.pointerEvents = 'stroke';
   hit.style.cursor = 'pointer';
   hit.style.display = 'block';
-  hit.onclick = (e) => {
-    e.stopPropagation();
-    state.selectedConn = conn.id;
-    state.selectedNode = null;
-    state.selectedRegion = null;
-    renderConnections();
-    setStatus('已選取連線 — 按 Del 刪除，雙擊編輯');
-  };
-  hit.ondblclick = (e) => { e.stopPropagation(); openConnEdit(conn.id); };
+  hit.addEventListener('mousedown', (e) => handleConnInteraction(e, false));
   svg.appendChild(hit);
 
-  // Visible line (sharp corners)
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   path.setAttribute('d', d);
   path.setAttribute('stroke', lineColor);
-  path.setAttribute('stroke-width', isSelected ? '3' : '2');
+  path.setAttribute('stroke-width', isSelected ? '4' : '2.5');
   path.setAttribute('fill', 'none');
   path.setAttribute('stroke-linejoin', 'round');
+  path.setAttribute('stroke-linecap', 'round');
+  if (isSelected) path.setAttribute('filter', 'drop-shadow(0px 0px 6px rgba(255,255,255,0.6))');
   path.style.pointerEvents = 'none';
   svg.appendChild(path);
 
-  // Pose markers — drawn in svg-top (above nodes) so they're never covered
   const svgTop = document.getElementById('svg-top');
   if (svgTop) {
     const shapeId = conn.shape || 'diamond';
@@ -650,34 +587,33 @@ function drawConnection(svg, conn, fromNode, toNode, fromFrac = 0.5, toFrac = 0.
       const dFill = '#14141e';
       const inset = (pt, side) => {
         const OFF = 5;
-        if (side==='right')  return { x: pt.x - OFF, y: pt.y };
-        if (side==='left')   return { x: pt.x + OFF, y: pt.y };
-        if (side==='bottom') return { x: pt.x, y: pt.y - OFF };
-        return                      { x: pt.x, y: pt.y + OFF };
+        if (side==='right') return { x: pt.x - OFF, y: pt.y };
+        if (side==='left')  return { x: pt.x + OFF, y: pt.y };
+        if (side==='bottom')return { x: pt.x, y: pt.y - OFF };
+        return              { x: pt.x, y: pt.y + OFF };
       };
-      const fpIn = inset(fp, exitSide);
-      const tpIn = inset(tp, entrySide);
-      // Always draw head shape
+      const fpIn = inset(fp, exitSide), tpIn = inset(tp, entrySide);
       drawPoseShape(svgTop, shapeId, fpIn.x, fpIn.y, 7, dFill, lineColor);
-      // Draw tail shape only if samePose is checked (default true)
-      const samePose = conn.samePose !== false;
-      if (samePose) {
-        drawPoseShape(svgTop, shapeId, tpIn.x, tpIn.y, 7, dFill, lineColor);
-      }
+      if (conn.samePose !== false) drawPoseShape(svgTop, shapeId, tpIn.x, tpIn.y, 7, dFill, lineColor);
     }
   }
 
-  // Arrowheads: forward on last segment, backward on first segment
-  if (conn.dir === 'forward') {
-    orthoArrow(svg, pts, arrowColor, true);
-  } else if (conn.dir === 'backward') {
-    orthoArrow(svg, pts, arrowColor, false);
-  } else if (conn.dir === 'both') {
-    orthoArrow(svg, pts, arrowColor, true);
-    orthoArrow(svg, pts, arrowColor, false);
+  // ─── 繪製置底箭頭 ───
+  const ptsLen = pts.length;
+  if (ptsLen > 1) {
+    if (conn.dir === 'forward' || conn.dir === 'both') {
+      const prev = pts[ptsLen - 2], curr = pts[ptsLen - 1];
+      const angle = Math.atan2(curr.y - prev.y, curr.x - prev.x);
+      drawEndpointArrow(svg, curr.x, curr.y, angle, arrowColor, isSelected);
+    }
+    if (conn.dir === 'backward' || conn.dir === 'both') {
+      const curr = pts[0], next = pts[1];
+      const angle = Math.atan2(curr.y - next.y, curr.x - next.x);
+      drawEndpointArrow(svg, curr.x, curr.y, angle, arrowColor, isSelected);
+    }
   }
 
-  // Label at midpoint of longest segment, offset perpendicular
+  // Label
   let longestSeg = null, longestLen = 0;
   for (let i = 1; i < pts.length; i++) {
     const len = Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y);
@@ -685,32 +621,28 @@ function drawConnection(svg, conn, fromNode, toNode, fromFrac = 0.5, toFrac = 0.
   }
   if (conn.label && longestSeg) {
     const lx = (longestSeg.a.x + longestSeg.b.x) / 2;
-    const ly = (longestSeg.a.y + longestSeg.b.y) / 2 - 14; // offset above line
+    const ly = (longestSeg.a.y + longestSeg.b.y) / 2 - 14; 
     const bgW = conn.label.length * 6.5 + 14;
     const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     bg.setAttribute('x', lx - bgW/2); bg.setAttribute('y', ly - 13);
-    bg.setAttribute('width', bgW);    bg.setAttribute('height', 17);
-    bg.setAttribute('fill', '#12121a'); bg.setAttribute('rx', 4);
+    bg.setAttribute('width', bgW);    bg.setAttribute('height', 18);
+    bg.setAttribute('fill', '#1a1a26'); bg.setAttribute('rx', 6);
+    bg.setAttribute('stroke', '#333'); bg.setAttribute('stroke-width', '1');
     bg.style.pointerEvents = 'auto'; bg.style.cursor = 'pointer';
-    bg.onclick    = (e) => { e.stopPropagation(); state.selectedConn = conn.id; state.selectedNode = null; renderConnections(); setStatus('已選取連線 — 按 Del 刪除，雙擊文字編輯'); };
-    bg.ondblclick = (e) => { e.stopPropagation(); openConnEdit(conn.id); };
+    bg.addEventListener('mousedown', (e) => handleConnInteraction(e, false));
     svg.appendChild(bg);
     const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    textEl.setAttribute('x', lx); textEl.setAttribute('y', ly);
+    textEl.setAttribute('x', lx); textEl.setAttribute('y', ly + 1);
     textEl.setAttribute('text-anchor', 'middle'); textEl.setAttribute('font-size', '11');
-    textEl.setAttribute('fill', '#7eb8f0');
+    textEl.setAttribute('fill', '#e2e0d8');
     textEl.setAttribute('font-family', 'Segoe UI, sans-serif');
     textEl.style.pointerEvents = 'auto'; textEl.style.cursor = 'pointer';
-    textEl.onclick    = (e) => { e.stopPropagation(); state.selectedConn = conn.id; state.selectedNode = null; renderConnections(); setStatus('已選取連線 — 按 Del 刪除，雙擊文字編輯'); };
-    textEl.ondblclick = (e) => { e.stopPropagation(); openConnEdit(conn.id); };
+    textEl.addEventListener('mousedown', (e) => handleConnInteraction(e, false));
     textEl.textContent = conn.label;
     svg.appendChild(textEl);
   }
-  // Segment drag handles — one grip per unique visual segment (after merging collinear runs)
-  if (!state.preview) {
-    const hDominant = exitSide === 'right' || exitSide === 'left';
 
-    // Merge collinear consecutive points so two co-directional stubs become one segment
+  if (!state.preview) {
     const simplePts = [pts[0]];
     for (let k = 1; k < pts.length - 1; k++) {
       const prev = simplePts[simplePts.length - 1];
@@ -721,7 +653,6 @@ function drawConnection(svg, conn, fromNode, toNode, fromFrac = 0.5, toFrac = 0.
     }
     simplePts.push(pts[pts.length - 1]);
 
-    // One grip per simplified segment. Cursor perpendicular to segment.
     for (let i = 1; i < simplePts.length; i++) {
       const a = simplePts[i-1], b = simplePts[i];
       const isHoriz = Math.abs(b.y - a.y) < 2;
@@ -729,7 +660,6 @@ function drawConnection(svg, conn, fromNode, toNode, fromFrac = 0.5, toFrac = 0.
       const segLen  = Math.hypot(b.x-a.x, b.y-a.y);
       if (segLen < 16) continue;
       if (!isHoriz && !isVert) continue;
-      const mx2 = (a.x+b.x)/2, my2 = (a.y+b.y)/2;
       const cursor = isHoriz ? 'ns-resize' : 'ew-resize';
       const segHit = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       segHit.setAttribute('x1', a.x); segHit.setAttribute('y1', a.y);
@@ -739,47 +669,34 @@ function drawConnection(svg, conn, fromNode, toNode, fromFrac = 0.5, toFrac = 0.
       segHit.style.pointerEvents = 'stroke';
       segHit.style.cursor = cursor;
       const capturedI = i, capturedIsHoriz = isHoriz;
-      segHit.addEventListener('mousedown', e => {
-        e.stopPropagation();
-        startSegmentDrag(e, conn, capturedIsHoriz, capturedI, simplePts);
-      });
+      segHit.addEventListener('mousedown', e => { handleConnInteraction(e, true, capturedIsHoriz, capturedI, simplePts); });
       svg.appendChild(segHit);
-      const gw = isHoriz ? 20 : 8, gh = isHoriz ? 8 : 20;
-      const grip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      grip.setAttribute('x', mx2 - gw/2); grip.setAttribute('y', my2 - gh/2);
-      grip.setAttribute('width', gw); grip.setAttribute('height', gh);
-      grip.setAttribute('fill', isSelected ? '#ffffff' : lineColor);
-      grip.setAttribute('rx', '3');
-      grip.setAttribute('opacity', isSelected ? '0.9' : '0.6');
-      grip.style.pointerEvents = 'none';
-      svg.appendChild(grip);
     }
   }
 
-  // Endpoint drag handles (shown only when selected)
-  if (isSelected) {
-    const svgTop = document.getElementById('svg-top');
-    if (svgTop) {
-      const addHandle = (hx, hy, which) => {
-        const s = 8;
-        const h = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        h.setAttribute('x', hx - s/2); h.setAttribute('y', hy - s/2);
-        h.setAttribute('width', s); h.setAttribute('height', s);
-        h.setAttribute('fill', '#14141e'); h.setAttribute('stroke', '#ffffff');
-        h.setAttribute('stroke-width', '2'); h.setAttribute('rx', '2');
-        h.style.pointerEvents = 'auto'; h.style.cursor = 'crosshair';
-        h.addEventListener('mousedown', e => {
-          e.stopPropagation();
-          const node = which === 'from' ? fromNode : toNode;
-          startEndpointDrag(e, conn, which, node);
-        });
-        svgTop.appendChild(h);
-      };
-      addHandle(fp.x, fp.y, 'from');
-      addHandle(tp.x, tp.y, 'to');
-    }
+  // ─── 選取時顯示端點拖拉圓圈 (FigJam 風格) ───
+  if (isSelected && svgTop) {
+    const addHandle = (hx, hy, which) => {
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', hx);
+      c.setAttribute('cy', hy);
+      c.setAttribute('r', '5.5');
+      c.setAttribute('fill', '#ffffff');
+      c.setAttribute('stroke', lineColor);
+      c.setAttribute('stroke-width', '2.5');
+      c.style.pointerEvents = 'auto';
+      c.style.cursor = 'crosshair';
+      c.addEventListener('mousedown', e => {
+        e.stopPropagation();
+        startEndpointDrag(e, conn, which);
+      });
+      svgTop.appendChild(c);
+    };
+    addHandle(fp.x, fp.y, 'from');
+    addHandle(tp.x, tp.y, 'to');
   }
 }
+
 function renderSidebar() {
   const list = document.getElementById('dragon-list');
   list.innerHTML = '';
@@ -790,10 +707,8 @@ function renderSidebar() {
     div.onclick = (e) => { if (!e.target.classList.contains('di-del')) setActiveDragon(d.id); };
     list.appendChild(div);
   });
-
 }
 
-// ─── Nearest side helper ──────────────────────────────────────────────────────
 function nearestSide(node, mx, my) {
   const nw = node.w||160, nh = node.h||70;
   const dRight  = Math.abs(mx - (node.x + nw));
@@ -830,55 +745,31 @@ function drawPortIndicators(node, activeSide) {
   });
 }
 
-// ─── Segment drag — all segments draggable ────────────────────────────────────
 function startSegmentDrag(e, conn, isHoriz, segIdx, simplePts) {
   e.stopPropagation();
   const wrap = document.getElementById('canvas-wrap');
   const rect = wrap.getBoundingClientRect();
-
-  // fp and tp are the fixed node-edge points (first/last of simplePts at drag start)
   const fp = { x: simplePts[0].x, y: simplePts[0].y };
   const tp = { x: simplePts[simplePts.length-1].x, y: simplePts[simplePts.length-1].y };
-
-  // Always snapshot from the CURRENT simplePts at drag start — this fixes "can't drag twice"
-  // by ensuring indices always match the currently rendered path
   const initUserPts = simplePts.slice(1, -1).map(p => ({ x: p.x, y: p.y }));
-
-  // Indices of the dragged segment's endpoints in initUserPts:
-  //   simplePts[segIdx-1] = initUserPts[segIdx-2]  (idxA=-1 → it's fp, not in userPts)
-  //   simplePts[segIdx]   = initUserPts[segIdx-1]  (idxB=len → it's tp, not in userPts)
   const idxA = segIdx - 2;
   const idxB = segIdx - 1;
 
   const onMove = ev => {
     const cx = ev.clientX - rect.left;
     const cy = ev.clientY - rect.top;
-
     let newPts = initUserPts.map(p => ({ ...p }));
-
     if (isHoriz) {
-      // Update Y of segment endpoints in userPts
       if (idxA >= 0 && idxA < newPts.length) newPts[idxA].y = cy;
       if (idxB >= 0 && idxB < newPts.length) newPts[idxB].y = cy;
-
-      // Segment borders fp (fixed) → insert L-bend {fp.x, cy} to avoid diagonal
       if (idxA < 0) newPts.unshift({ x: fp.x, y: cy });
-
-      // Segment borders tp (fixed) → insert L-bend {tp.x, cy} to avoid diagonal
       if (idxB >= initUserPts.length) newPts.push({ x: tp.x, y: cy });
-
     } else {
-      // Update X of segment endpoints in userPts
       if (idxA >= 0 && idxA < newPts.length) newPts[idxA].x = cx;
       if (idxB >= 0 && idxB < newPts.length) newPts[idxB].x = cx;
-
-      // Segment borders fp → insert L-bend {cx, fp.y}
       if (idxA < 0) newPts.unshift({ x: cx, y: fp.y });
-
-      // Segment borders tp → insert L-bend {cx, tp.y}
       if (idxB >= initUserPts.length) newPts.push({ x: cx, y: tp.y });
     }
-
     conn.userPts = newPts;
     renderConnections();
   };
@@ -888,37 +779,76 @@ function startSegmentDrag(e, conn, isHoriz, segIdx, simplePts) {
     document.removeEventListener('mouseup', onUp);
     renderCanvas();
   };
-
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 }
 
-function startEndpointDrag(e, conn, which, node) {
+// ─── 端點跨節點拖曳判定 ───
+function startEndpointDrag(e, conn, which) {
   e.stopPropagation();
   const wrap = document.getElementById('canvas-wrap');
   const rect = wrap.getBoundingClientRect();
+  const dragon = getDragon();
 
   const onMove = ev => {
     const mx = ev.clientX - rect.left;
     const my = ev.clientY - rect.top;
-    const side = nearestSide(node, mx, my);
-    renderConnections();
-    drawPortIndicators(node, side);
+
+    let targetNode = null;
+    let minDist = Infinity;
+
+    // 尋找游標附近的節點 (加長判定範圍)
+    dragon.nodes.forEach(n => {
+      const nw = n.w || 160, nh = n.h || 70;
+      const pad = 40; 
+      if (mx >= n.x - pad && mx <= n.x + nw + pad &&
+          my >= n.y - pad && my <= n.y + nh + pad) {
+         const cx = n.x + nw/2;
+         const cy = n.y + nh/2;
+         const dist = Math.hypot(mx - cx, my - cy);
+         if (dist < minDist) {
+           minDist = dist;
+           targetNode = n;
+         }
+      }
+    });
+
+    if (targetNode) {
+      const side = nearestSide(targetNode, mx, my);
+      if (which === 'from') {
+        conn.from = targetNode.id;
+        conn.fromSide = side;
+      } else {
+        conn.to = targetNode.id;
+        conn.toSide = side;
+      }
+      conn.userPts = null;
+      conn.midOffset = null;
+      renderConnections();
+      drawPortIndicators(targetNode, side); // renderConnections 後顯示點
+    } else {
+       // 如果拖到空地，保持在原本的節點上預覽
+       const fallbackNodeId = which === 'from' ? conn.from : conn.to;
+       const cNode = dragon.nodes.find(n => n.id === fallbackNodeId);
+       if (cNode) {
+         const side = nearestSide(cNode, mx, my);
+         if (which === 'from') conn.fromSide = side;
+         else conn.toSide = side;
+         conn.userPts = null;
+         conn.midOffset = null;
+         renderConnections();
+         drawPortIndicators(cNode, side);
+       }
+    }
   };
 
   const onUp = ev => {
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
-    const mx = ev.clientX - rect.left;
-    const my = ev.clientY - rect.top;
-    const side = nearestSide(node, mx, my);
-    if (which === 'from') conn.fromSide = side;
-    else conn.toSide = side;
-    conn.midOffset = null;
-    conn.userPts = null; // reset path on side change
     renderCanvas();
+    const finalSide = which === 'from' ? conn.fromSide : conn.toSide;
     const sideNames = { right:'右側', left:'左側', top:'上方', bottom:'下方' };
-    setStatus(`已設定連接口為「${sideNames[side]}」`);
+    setStatus(`已重新連接至「${sideNames[finalSide]}」`);
   };
 
   document.addEventListener('mousemove', onMove);
@@ -930,7 +860,6 @@ function renderCanvas() {
   const canvas = document.getElementById('canvas');
   const svg = document.getElementById('svg-conn');
 
-  // Clear
   canvas.innerHTML = '';
   const defs = svg.querySelector('defs');
   svg.innerHTML = '';
@@ -939,48 +868,25 @@ function renderCanvas() {
   if (svgTop) svgTop.innerHTML = '';
 
   if (!dragon) {
-    canvas.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#444;font-size:14px;">← 選擇或新增龍角色<br><span style="font-size:12px;margin-top:6px;display:block">然後點「貼上動作」新增節點</span></div>';
+    canvas.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#666;font-size:15px;background:#1a1a26;padding:16px 24px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:1px solid #333;">← 請先選擇或新增龍角色<br><span style="font-size:12px;margin-top:8px;color:#888;display:block">接著點「貼上動作」即可快速生成節點</span></div>';
     return;
   }
 
   if (dragon.nodes.length === 0 && (!dragon.regions || dragon.regions.length === 0)) {
-    canvas.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#444;font-size:14px;">點「貼上動作」新增節點</div>';
+    canvas.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#666;font-size:15px;background:#1a1a26;padding:16px 24px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:1px solid #333;">點擊上方的「貼上動作」新增節點</div>';
   }
 
-  // Render regions (background labeled boxes)
-  const rLayer = document.getElementById('regions-layer');
-  rLayer.innerHTML = '';
-  (dragon.regions || []).forEach(region => {
-    const rc = REGION_COLORS.find(c => c.id === region.color) || REGION_COLORS[0];
-    const div = document.createElement('div');
-    const isSelR = state.selectedRegion === region.id;
-    div.style.cssText = `position:absolute;left:${region.x}px;top:${region.y}px;width:${region.w}px;height:${region.h}px;
-      background:${rc.bg};border:2px ${isSelR ? 'solid' : 'dashed'} ${rc.border};border-radius:10px;box-sizing:border-box;cursor:pointer;`;
-    // Label tag at top-left
-    const tag = document.createElement('div');
-    tag.style.cssText = `position:absolute;top:-1px;left:12px;background:${rc.border};color:${rc.text};
-      font-size:11px;font-weight:600;padding:2px 10px 3px;border-radius:0 0 6px 6px;letter-spacing:0.04em;white-space:nowrap;`;
-    tag.textContent = region.label;
-    div.appendChild(tag);
-    div.addEventListener('click', e => { e.stopPropagation(); openRegionEdit(region.id); });
-    // Make region draggable
-    div.addEventListener('mousedown', e => { if (state.mode === 'select') onRegionMousedown(e, region.id); });
-    rLayer.appendChild(div);
-  });
+  renderRegions(); 
 
-  // Render connections
-  const connOffsets = computeConnOffsets(dragon);
   dragon.connections.forEach(conn => {
     const fromNode = dragon.nodes.find(n => n.id === conn.from);
     const toNode = dragon.nodes.find(n => n.id === conn.to);
     if (!fromNode || !toNode) return;
-    const o = connOffsets[conn.id] || { from: 0.5, to: 0.5 };
-    const fromFrac = conn.fromFrac ?? o.from;
-    const toFrac   = conn.toFrac   ?? o.to;
+    const fromFrac = conn.fromFrac ?? 0.5;
+    const toFrac   = conn.toFrac   ?? 0.5;
     drawConnection(svg, conn, fromNode, toNode, fromFrac, toFrac);
   });
 
-  // Render nodes
   dragon.nodes.forEach(node => {
     const cat = CATS[node.cat] || CATS['其他'];
     const div = document.createElement('div');
@@ -1012,7 +918,45 @@ function renderCanvas() {
   });
 }
 
-// ─── Dragon Management ────────────────────────────────────────────────────────
+function renderRegions() {
+  const dragon = getDragon();
+  const rLayer = document.getElementById('regions-layer');
+  if (!rLayer || !dragon) return;
+  rLayer.innerHTML = '';
+  (dragon.regions || []).forEach(region => {
+    const rc = REGION_COLORS.find(c => c.id === region.color) || REGION_COLORS[0];
+    const div = document.createElement('div');
+    const isSel = state.selectedRegion === region.id;
+    
+    div.style.cssText = `position:absolute;left:${region.x}px;top:${region.y}px;width:${region.w}px;height:${region.h}px;
+      background:${rc.bg}; border: 1.5px ${isSel ? 'solid' : 'dashed'} ${rc.border}; border-radius:12px;
+      box-sizing:border-box; cursor:pointer; pointer-events:auto;
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      box-shadow: ${isSel ? `0 0 0 2px ${rc.border}, 0 4px 12px rgba(0,0,0,0.15)` : '0 4px 12px rgba(0,0,0,0.08)'};
+      transition: box-shadow 0.2s, border 0.2s;`;
+      
+    const tag = document.createElement('div');
+    tag.style.cssText = `position:absolute;top:-1.5px;left:-1.5px;background:${rc.border};color:${rc.text};
+      font-size:12px;font-weight:600;padding:4px 14px;
+      border-radius:12px 0 12px 0; letter-spacing:0.04em;white-space:nowrap;
+      box-shadow: 2px 2px 6px rgba(0,0,0,0.2);`;
+    tag.textContent = region.label;
+    
+    div.appendChild(tag);
+    div.addEventListener('click', e => {
+      e.stopPropagation();
+      state.selectedRegion = region.id;
+      state.selectedNode = null;
+      state.selectedConn = null;
+      renderRegions();
+      setStatus('已選取情境區域 — 雙擊編輯名稱，拖曳移動（含框內節點）');
+    });
+    div.addEventListener('dblclick', e => { e.stopPropagation(); openRegionEdit(region.id); });
+    div.addEventListener('mousedown', e => { if (state.mode === 'select') onRegionDrag(e, region.id); });
+    rLayer.appendChild(div);
+  });
+}
+
 function addDragon() {
   const inp = document.getElementById('new-dragon-name');
   const name = inp.value.trim() || `龍 ${state.dragons.length + 1}`;
@@ -1042,7 +986,6 @@ function deleteDragon(id, e) {
   });
 }
 
-// ─── Import ────────────────────────────────────────────────────────────────────
 function showImport() {
   if (!getDragon()) { setStatus('⚠ 請先選擇或新增龍角色'); return; }
   document.getElementById('import-text').value = '';
@@ -1060,7 +1003,6 @@ function importActions() {
   const startY = 40;
   const padX = 180;
   const padY = 110;
-  const startIdx = dragon.nodes.length;
 
   lines.forEach((line, i) => {
     const col = i % cols;
@@ -1081,7 +1023,6 @@ function importActions() {
   setStatus(`已生成 ${lines.length} 個節點`);
 }
 
-// ─── Mode ─────────────────────────────────────────────────────────────────────
 function setMode(mode) {
   state.mode = mode;
   state.connectFrom = null;
@@ -1099,7 +1040,6 @@ function setMode(mode) {
   renderCanvas();
 }
 
-// ─── Node Interaction ─────────────────────────────────────────────────────────
 function onNodeMousedown(e, nodeId) {
   e.stopPropagation();
   if (e.button !== 0) return;
@@ -1113,18 +1053,11 @@ function onNodeMousedown(e, nodeId) {
   const dragon = getDragon();
   const isInMultiSelect = state.multiSelect.nodes.includes(nodeId);
 
-  // ── Multi-select group drag ──
   if (isInMultiSelect && state.multiSelect.nodes.length > 1) {
     const nodeIds = state.multiSelect.nodes;
-
-    // Clear userPts for all connections involving any of the selected nodes
     dragon.connections.forEach(c => {
-      if (nodeIds.includes(c.from) || nodeIds.includes(c.to)) {
-        c.userPts = null;
-        c.midOffset = null;
-      }
+      if (nodeIds.includes(c.from) || nodeIds.includes(c.to)) { c.userPts = null; c.midOffset = null; }
     });
-
     const origPositions = nodeIds.map(id => {
       const n = dragon.nodes.find(n => n.id === id);
       return { id, x: n.x, y: n.y };
@@ -1144,35 +1077,22 @@ function onNodeMousedown(e, nodeId) {
       });
       renderConnections();
     };
-
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-
+    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
     return;
   }
 
-  // ── Single node select + drag ──
   state.selectedNode = nodeId;
   state.selectedConn = null;
   state.multiSelect = { nodes: [], conns: [], regions: [] };
 
   const node = dragon.nodes.find(n => n.id === nodeId);
-
-  // Clear userPts for all connections involving this node so
-  // the auto-router keeps lines orthogonal while the node moves
   dragon.connections.forEach(c => {
-    if (c.from === nodeId || c.to === nodeId) {
-      c.userPts = null;
-      c.midOffset = null;
-    }
+    if (c.from === nodeId || c.to === nodeId) { c.userPts = null; c.midOffset = null; }
   });
 
   state.dragging = { nodeId, startMouseX: e.clientX, startMouseY: e.clientY, startNodeX: node.x, startNodeY: node.y };
-
   renderCanvas();
 
   const onMove = ev => {
@@ -1185,7 +1105,6 @@ function onNodeMousedown(e, nodeId) {
     if (el) { el.style.left = node.x + 'px'; el.style.top = node.y + 'px'; }
     renderConnections();
   };
-
   const onUp = () => {
     state.dragging = null;
     document.removeEventListener('mousemove', onMove);
@@ -1204,19 +1123,16 @@ function renderConnections() {
   while (svg.lastChild && svg.lastChild !== defs) svg.removeChild(svg.lastChild);
   if (svgTop) svgTop.innerHTML = '';
   if (!dragon) return;
-  const offsets = computeConnOffsets(dragon);
   dragon.connections.forEach(conn => {
     const fromNode = dragon.nodes.find(n => n.id === conn.from);
     const toNode = dragon.nodes.find(n => n.id === conn.to);
     if (!fromNode || !toNode) return;
-    const o = offsets[conn.id] || { from: 0.5, to: 0.5 };
-    const fromFrac = conn.fromFrac ?? o.from;
-    const toFrac   = conn.toFrac   ?? o.to;
+    const fromFrac = conn.fromFrac ?? 0.5;
+    const toFrac   = conn.toFrac   ?? 0.5;
     drawConnection(svg, conn, fromNode, toNode, fromFrac, toFrac);
   });
 }
 
-// ─── Connect ─────────────────────────────────────────────────────────────────
 function handleConnectClick(nodeId) {
   if (!state.connectFrom) {
     state.connectFrom = nodeId;
@@ -1267,19 +1183,15 @@ function cancelConnect() {
   renderCanvas();
 }
 
-// ─── Node Edit ────────────────────────────────────────────────────────────────
 function openNodeEdit(nodeId) {
   const dragon = getDragon();
   const node = dragon.nodes.find(n => n.id === nodeId);
   if (!node) return;
   state.editingNode = nodeId;
-
   document.getElementById('node-edit-name').value = node.name;
   document.getElementById('node-edit-notes').value = node.notes || '';
-
   const sel = document.getElementById('node-edit-cat');
   sel.innerHTML = Object.keys(CATS).map(k => `<option value="${k}" ${k === node.cat ? 'selected' : ''}>${k}</option>`).join('');
-
   showModal('modal-node');
 }
 
@@ -1305,7 +1217,6 @@ function deleteNode() {
   });
 }
 
-// ─── Connection Edit ──────────────────────────────────────────────────────────
 function openConnEdit(connId) {
   const dragon = getDragon();
   const conn = dragon.connections.find(c => c.id === connId);
@@ -1345,7 +1256,6 @@ function deleteConn() {
   renderCanvas();
 }
 
-// ─── Utilities ─────────────────────────────────────────────────────────────────
 function clearCanvas() {
   const dragon = getDragon();
   if (!dragon) return;
@@ -1360,14 +1270,11 @@ function clearCanvas() {
 function autoLayout() {
   const dragon = getDragon();
   if (!dragon || dragon.nodes.length === 0) return;
-
-  // Group by category
   const groups = {};
   dragon.nodes.forEach(n => {
     if (!groups[n.cat]) groups[n.cat] = [];
     groups[n.cat].push(n);
   });
-
   const catOrder = ['出現', '待機', '移動', '飛行', '攻擊', '受傷', '死亡', '吼叫', '其他'];
   const cols = 4;
   let row = 0, col = 0;
@@ -1382,16 +1289,14 @@ function autoLayout() {
       if (col >= cols) { col = 0; row++; }
     });
   });
-
   renderCanvas();
 }
 
-// ─── Export PNG ───────────────────────────────────────────────────────────────
+// ─── 匯出 PNG (包含新箭頭) ───
 function exportPNG() {
   const dragon = getDragon();
   if (!dragon || dragon.nodes.length === 0) { setStatus('⚠ 沒有可匯出的節點'); return; }
 
-  // Find bounding box
   let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
   dragon.nodes.forEach(n => {
     const w = n.w || 160, h = n.h || 70;
@@ -1406,15 +1311,13 @@ function exportPNG() {
   const H = maxY - minY + pad * 2;
 
   const canvas = document.createElement('canvas');
-  canvas.width = W * 2; canvas.height = H * 2; // 2x for retina
+  canvas.width = W * 2; canvas.height = H * 2; 
   const ctx = canvas.getContext('2d');
   ctx.scale(2, 2);
 
-  // Background
   ctx.fillStyle = '#14141e';
   ctx.fillRect(0, 0, W, H);
 
-  // Grid
   ctx.fillStyle = '#2a2a38';
   for (let gx = 0; gx < W; gx += 28) {
     for (let gy = 0; gy < H; gy += 28) {
@@ -1426,18 +1329,21 @@ function exportPNG() {
 
   const ox = -minX + pad, oy = -minY + pad;
 
-  // helpers for PNG export
-  function pngArrow(ax, ay, angle, color) {
-    const S=12, W=0.40;
+  function pngEndpointArrow(ax, ay, angle, color) {
+    const S=12, W=0.45;
     ctx.fillStyle = color;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
     ctx.beginPath();
     ctx.moveTo(ax, ay);
     ctx.lineTo(ax - S*Math.cos(angle-W), ay - S*Math.sin(angle-W));
     ctx.lineTo(ax - S*Math.cos(angle+W), ay - S*Math.sin(angle+W));
     ctx.closePath();
     ctx.fill();
+    ctx.stroke();
   }
-  function pngCircleBg(px,py){ ctx.beginPath(); ctx.arc(px,py,10,0,Math.PI*2); ctx.fillStyle='#14141e'; ctx.fill(); }
+  
   function pngDiamond(px, py, color) {
     const s = 7;
     ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.fillStyle = '#14141e';
@@ -1446,78 +1352,12 @@ function exportPNG() {
     ctx.closePath(); ctx.fill(); ctx.stroke();
   }
 
-  // Draw connections using orthogonal routing
-  const pngOffsets = computeConnOffsets(dragon);
-  dragon.connections.forEach(conn => {
-    const fn = dragon.nodes.find(n => n.id === conn.from);
-    const tn = dragon.nodes.find(n => n.id === conn.to);
-    if (!fn || !tn) return;
-
-    const fnO = { ...fn, x: fn.x+ox, y: fn.y+oy };
-    const tnO = { ...tn, x: tn.x+ox, y: tn.y+oy };
-    const o = pngOffsets[conn.id] || { from: 0.5, to: 0.5 };
-    const fromFrac = conn.fromFrac ?? o.from;
-    const toFrac   = conn.toFrac   ?? o.to;
-    const { pts } = orthoRoute(fnO, tnO, fromFrac, toFrac, conn.fromSide || null, conn.toSide || null, conn.midOffset ?? null);
-
-    const cObj = CONN_COLORS.find(c => c.id === (conn.color||'blue'));
-    const lineColor = cObj ? cObj.stroke : '#4a90d9';
-
-    ctx.strokeStyle = lineColor;
-    ctx.lineWidth = 2;
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    pts.forEach((p,i) => i===0 ? ctx.moveTo(p.x,p.y) : ctx.lineTo(p.x,p.y));
-    ctx.stroke();
-
-    // Pose diamonds
-    const fp = pts[0], tp = pts[pts.length-1];
-    pngDiamond(fp.x, fp.y, lineColor);
-    pngDiamond(tp.x, tp.y, lineColor);
-
-    // Arrow: forward on last segment, backward on first segment
-    function pngSegArrow(segPts, fwd) {
-      if (fwd) {
-        for (let i = segPts.length-1; i>=1; i--) {
-          const dx=segPts[i].x-segPts[i-1].x, dy=segPts[i].y-segPts[i-1].y;
-          if (Math.hypot(dx,dy)>2) {
-            const mx=segPts[i-1].x+dx*0.5, my=segPts[i-1].y+dy*0.5;
-            pngCircleBg(mx,my); pngArrow(mx,my,Math.atan2(dy,dx),lineColor); return;
-          }
-        }
-      } else {
-        for (let i=1; i<segPts.length; i++) {
-          const dx=segPts[i-1].x-segPts[i].x, dy=segPts[i-1].y-segPts[i].y;
-          if (Math.hypot(dx,dy)>2) {
-            const mx=segPts[i].x+dx*0.5, my=segPts[i].y+dy*0.5;
-            pngCircleBg(mx,my); pngArrow(mx,my,Math.atan2(dy,dx),lineColor); return;
-          }
-        }
-      }
-    }
-    if (conn.dir==='forward'||conn.dir==='both') pngSegArrow(pts, true);
-    if (conn.dir==='backward'||conn.dir==='both') pngSegArrow(pts, false);
-
-    if (conn.label && longestSeg) {
-      const lx=(longestSeg.a.x+longestSeg.b.x)/2, ly=(longestSeg.a.y+longestSeg.b.y)/2 - 14;
-      ctx.font = '10px Segoe UI, sans-serif';
-      const lw = ctx.measureText(conn.label).width;
-      ctx.fillStyle = '#12121a';
-      ctx.fillRect(lx - lw/2 - 5, ly - 13, lw + 10, 17);
-      ctx.fillStyle = '#7eb8f0';
-      ctx.textAlign = 'center';
-      ctx.fillText(conn.label, lx, ly);
-    }
-  });
-
-  // Draw nodes
   dragon.nodes.forEach(node => {
     const cat = CATS[node.cat] || CATS['其他'];
     const x = node.x + ox, y = node.y + oy;
     const w = node.w || 160, h = node.h || 70;
     const r = 8;
 
-    // Box
     ctx.fillStyle = cat.bg;
     ctx.strokeStyle = cat.border;
     ctx.lineWidth = 1.5;
@@ -1526,14 +1366,12 @@ function exportPNG() {
     ctx.fill();
     ctx.stroke();
 
-    // Node name
     ctx.fillStyle = cat.text;
     ctx.font = '13px Consolas, Courier New, monospace';
     ctx.textAlign = 'left';
     const words = node.name;
     ctx.fillText(words.length > 22 ? words.slice(0, 22) + '…' : words, x + 12, y + 22);
 
-    // Notes
     if (node.notes) {
       ctx.fillStyle = cat.label;
       ctx.font = 'italic 11px Segoe UI, sans-serif';
@@ -1541,20 +1379,62 @@ function exportPNG() {
     }
   });
 
-  // Title
+  dragon.connections.forEach(conn => {
+    const fn = dragon.nodes.find(n => n.id === conn.from);
+    const tn = dragon.nodes.find(n => n.id === conn.to);
+    if (!fn || !tn) return;
+
+    const fnO = { ...fn, x: fn.x+ox, y: fn.y+oy };
+    const tnO = { ...tn, x: tn.x+ox, y: tn.y+oy };
+    const { pts } = orthoRoute(fnO, tnO, conn.fromFrac ?? 0.5, conn.toFrac ?? 0.5, conn.fromSide || null, conn.toSide || null, conn.midOffset ?? null);
+
+    const cObj = CONN_COLORS.find(c => c.id === (conn.color||'blue'));
+    const lineColor = cObj ? cObj.stroke : '#4a90d9';
+
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    
+    if (pts.length > 0) ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) {
+       ctx.arcTo(pts[i].x, pts[i].y, pts[i+1].x, pts[i+1].y, 14);
+    }
+    if (pts.length > 1) ctx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
+    ctx.stroke();
+
+    const fp = pts[0], tp = pts[pts.length-1];
+    pngDiamond(fp.x, fp.y, lineColor);
+    pngDiamond(tp.x, tp.y, lineColor);
+
+    // PNG 端點箭頭繪製
+    const ptsLen = pts.length;
+    if (ptsLen > 1) {
+      if (conn.dir==='forward'||conn.dir==='both') {
+        const prev = pts[ptsLen - 2], curr = pts[ptsLen - 1];
+        const angle = Math.atan2(curr.y - prev.y, curr.x - prev.x);
+        pngEndpointArrow(curr.x, curr.y, angle, lineColor);
+      }
+      if (conn.dir==='backward'||conn.dir==='both') {
+        const curr = pts[0], next = pts[1];
+        const angle = Math.atan2(curr.y - next.y, curr.x - next.x);
+        pngEndpointArrow(curr.x, curr.y, angle, lineColor);
+      }
+    }
+  });
+
   ctx.fillStyle = '#555';
   ctx.font = '11px Segoe UI, sans-serif';
   ctx.textAlign = 'left';
   ctx.fillText(dragon.name + ' — Dragon Flow', pad, H - 10);
 
-  // Download
   const link = document.createElement('a');
   link.download = `${dragon.name.replace(/\s/g, '_')}_flow.png`;
   link.href = canvas.toDataURL('image/png');
   link.click();
 }
 
-// ─── Shape picker ─────────────────────────────────────────────────────────────
 function buildShapePicker(containerId, isEdit) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -1567,7 +1447,6 @@ function buildShapePicker(containerId, isEdit) {
       border:2px solid ${isSel ? '#7eb8f0' : 'transparent'};background:${isSel ? 'rgba(126,184,240,0.12)' : 'transparent'};`;
 
     if (sh.id === 'none') {
-      // Show a dash/line for "none"
       const preview = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       preview.setAttribute('width', '24'); preview.setAttribute('height', '24');
       preview.setAttribute('viewBox', '0 0 24 24');
@@ -1585,7 +1464,6 @@ function buildShapePicker(containerId, isEdit) {
       drawPoseShape(preview, sh.id, 12, 12, 8, '#14141e', '#7eb8f0');
       btn.appendChild(preview);
     }
-
     const lbl = document.createElement('span');
     lbl.style.cssText = 'font-size:10px;color:#aaa;white-space:nowrap;';
     lbl.textContent = sh.label;
@@ -1599,7 +1477,6 @@ function buildShapePicker(containerId, isEdit) {
   });
 }
 
-// ─── Connection color picker ──────────────────────────────────────────────────
 function buildConnColorPicker(containerId, isEdit) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -1624,7 +1501,6 @@ function buildConnColorPicker(containerId, isEdit) {
   });
 }
 
-// ─── Preview Mode ─────────────────────────────────────────────────────────────
 function togglePreview() {
   state.preview = !state.preview;
   const btn = document.getElementById('btn-preview');
@@ -1645,14 +1521,10 @@ function togglePreview() {
   }
 }
 
-// ─── Modal ────────────────────────────────────────────────────────────────────
 function showModal(id) { document.getElementById(id).style.display = 'flex'; }
 function hideModal(id) { document.getElementById(id).style.display = 'none'; }
-
-// ─── Status ───────────────────────────────────────────────────────────────────
 function setStatus(msg) { document.getElementById('statusbar').textContent = msg; }
 
-// ─── Copy Node ────────────────────────────────────────────────────────────────
 function copyNode() {
   const dragon = getDragon();
   if (!dragon || !state.selectedNode) { setStatus('⚠ 請先點選一個節點再複製'); return; }
@@ -1665,38 +1537,6 @@ function copyNode() {
   setStatus('節點已複製！');
 }
 
-// ─── Region: render layer ─────────────────────────────────────────────────────
-function renderRegions() {
-  const dragon = getDragon();
-  const rLayer = document.getElementById('regions-layer');
-  if (!rLayer || !dragon) return;
-  rLayer.innerHTML = '';
-  (dragon.regions || []).forEach(region => {
-    const rc = REGION_COLORS.find(c => c.id === region.color) || REGION_COLORS[0];
-    const div = document.createElement('div');
-    const isSel = state.selectedRegion === region.id;
-    div.style.cssText = `position:absolute;left:${region.x}px;top:${region.y}px;width:${region.w}px;height:${region.h}px;
-      background:${rc.bg};border:2px ${isSel ? 'solid' : 'dashed'} ${rc.border};border-radius:10px;box-sizing:border-box;cursor:pointer;pointer-events:auto;`;
-    const tag = document.createElement('div');
-    tag.style.cssText = `position:absolute;top:-1px;left:12px;background:${rc.border};color:${rc.text};
-      font-size:11px;font-weight:600;padding:2px 10px 3px;border-radius:0 0 6px 6px;letter-spacing:0.04em;white-space:nowrap;`;
-    tag.textContent = region.label;
-    div.appendChild(tag);
-    div.addEventListener('click', e => {
-      e.stopPropagation();
-      state.selectedRegion = region.id;
-      state.selectedNode = null;
-      state.selectedConn = null;
-      renderRegions();
-      setStatus('已選取情境區域 — 雙擊編輯名稱，拖曳移動（含框內節點）');
-    });
-    div.addEventListener('dblclick', e => { e.stopPropagation(); openRegionEdit(region.id); });
-    div.addEventListener('mousedown', e => { if (state.mode === 'select') onRegionDrag(e, region.id); });
-    rLayer.appendChild(div);
-  });
-}
-
-// ─── Region: drag to move (with contained nodes) ──────────────────────────────
 function onRegionDrag(e, regionId) {
   e.stopPropagation();
   const dragon = getDragon();
@@ -1706,7 +1546,6 @@ function onRegionDrag(e, regionId) {
   state.selectedNode = null;
   state.selectedConn = null;
 
-  // Find nodes fully inside the region at drag start
   const contained = dragon.nodes.filter(n => {
     const nw = n.w || 160, nh = n.h || 70;
     return n.x >= region.x && n.y >= region.y &&
@@ -1729,7 +1568,6 @@ function onRegionDrag(e, regionId) {
       const node = dragon.nodes.find(n => n.id === o.id);
       if (node) { node.x = o.x + dx; node.y = o.y + dy; }
     });
-    // Update node DOM positions directly for performance
     origNodes.forEach(o => {
       const el = document.getElementById('node-' + o.id);
       if (el) {
@@ -1741,20 +1579,15 @@ function onRegionDrag(e, regionId) {
     renderRegions();
     renderConnections();
   };
-  const onUp = () => {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-  };
+  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 }
 
-// ─── Region: draw on canvas-wrap mousedown ────────────────────────────────────
 document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
   if (state.preview) return;
   const validTargets = ['canvas-wrap', 'canvas', 'grid-bg'];
 
-  // ── Box-select in select mode ──
   if (state.mode === 'select' && validTargets.includes(e.target.id)) {
     const wrap = document.getElementById('canvas-wrap');
     const rect = wrap.getBoundingClientRect();
@@ -1769,8 +1602,9 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
       const w = Math.abs(cx - startX), h = Math.abs(cy - startY);
       if (w > 4 || h > 4) {
         dragged = true;
+        // Smoother select box styling
         selRect.style.cssText = `display:block;position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;
-          border:1.5px dashed #e0e0e0;border-radius:3px;background:rgba(255,255,255,0.05);pointer-events:none;`;
+          border:1.5px dashed rgba(240,192,96,0.6);border-radius:6px;background:rgba(240,192,96,0.08);pointer-events:none;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);`;
       }
     };
 
@@ -1780,7 +1614,6 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
       selRect.style.display = 'none';
       if (!dragged) return;
 
-      // Compute selection rect in canvas coords
       const cx = ev.clientX - rect.left, cy = ev.clientY - rect.top;
       const sx = Math.min(startX, cx), sy = Math.min(startY, cy);
       const sw = Math.abs(cx - startX), sh = Math.abs(cy - startY);
@@ -1789,21 +1622,13 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
       const dragon = getDragon();
       if (!dragon) return;
 
-      // Find nodes inside rect
       const selNodes = dragon.nodes.filter(n => {
         const nw = n.w || 160, nh = n.h || 70;
         return n.x < sx+sw && n.x+nw > sx && n.y < sy+sh && n.y+nh > sy;
       }).map(n => n.id);
 
-      // Find connections where both endpoints are inside (by checking node membership)
-      const selConns = dragon.connections.filter(c =>
-        selNodes.includes(c.from) && selNodes.includes(c.to)
-      ).map(c => c.id);
-
-      // Find regions overlapping selection
-      const selRegions = (dragon.regions || []).filter(r =>
-        r.x < sx+sw && r.x+r.w > sx && r.y < sy+sh && r.y+r.h > sy
-      ).map(r => r.id);
+      const selConns = dragon.connections.filter(c => selNodes.includes(c.from) && selNodes.includes(c.to)).map(c => c.id);
+      const selRegions = (dragon.regions || []).filter(r => r.x < sx+sw && r.x+r.w > sx && r.y < sy+sh && r.y+r.h > sy).map(r => r.id);
 
       const total = selNodes.length + selConns.length + selRegions.length;
       if (total === 0) {
@@ -1825,7 +1650,6 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
     return;
   }
 
-  // ── Region drawing mode ──
   if (state.mode !== 'region') return;
   const regionTargets = ['canvas-wrap', 'canvas', 'grid-bg', 'regions-layer', 'region-draft'];
   if (!regionTargets.includes(e.target.id)) return;
@@ -1842,7 +1666,7 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
     const x = Math.min(startX, cx), y = Math.min(startY, cy);
     const w = Math.abs(cx - startX), h = Math.abs(cy - startY);
     draft.style.cssText = `display:block;position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;
-      border:2px dashed #7eb8f0;border-radius:6px;background:rgba(126,184,240,0.08);pointer-events:none;`;
+      border:2px dashed rgba(126,184,240,0.6);border-radius:12px;background:rgba(126,184,240,0.1);pointer-events:none;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);`;
     state.regionDraft = { x, y, w, h };
   };
 
@@ -1865,7 +1689,6 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
   document.addEventListener('mouseup', onUp);
 });
 
-// ─── Region: color picker builder ─────────────────────────────────────────────
 function buildColorPicker(containerId, isEdit) {
   const container = document.getElementById(containerId);
   container.innerHTML = '';
@@ -1885,7 +1708,6 @@ function buildColorPicker(containerId, isEdit) {
   });
 }
 
-// ─── Region: save new ─────────────────────────────────────────────────────────
 function saveRegion() {
   const dragon = getDragon();
   if (!dragon || !state.pendingRegion) return;
@@ -1899,7 +1721,6 @@ function saveRegion() {
   renderCanvas();
 }
 
-// ─── Region: edit existing ────────────────────────────────────────────────────
 function openRegionEdit(regionId) {
   const dragon = getDragon();
   const region = (dragon.regions || []).find(r => r.id === regionId);
@@ -1935,7 +1756,6 @@ function deleteRegion() {
   });
 }
 
-// ─── Click background to deselect ────────────────────────────────────────────
 document.getElementById('canvas-wrap').addEventListener('click', e => {
   const bg = ['canvas-wrap', 'canvas', 'grid-bg'];
   if (!bg.includes(e.target.id)) return;
@@ -1948,73 +1768,6 @@ document.getElementById('canvas-wrap').addEventListener('click', e => {
   renderRegions();
 });
 
-// ─── Drag-select (box select in select mode) ──────────────────────────────────
-document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
-  if (state.mode !== 'select') return;
-  if (state.preview) return;
-  // Only start drag-select on empty background (not on nodes/regions)
-  const bg = ['canvas-wrap', 'canvas', 'grid-bg'];
-  if (!bg.includes(e.target.id)) return;
-  if (e.button !== 0) return;
-
-  const wrap = document.getElementById('canvas-wrap');
-  const rect = wrap.getBoundingClientRect();
-  const startX = e.clientX - rect.left;
-  const startY = e.clientY - rect.top;
-
-  // Reuse region-draft div as selection box
-  const draft = document.getElementById('region-draft');
-  let dragging = false;
-  let selRect = null;
-
-  const onMove = ev => {
-    const cx = ev.clientX - rect.left;
-    const cy = ev.clientY - rect.top;
-    const x = Math.min(startX, cx), y = Math.min(startY, cy);
-    const w = Math.abs(cx - startX), h = Math.abs(cy - startY);
-    if (w > 4 || h > 4) {
-      dragging = true;
-      draft.style.cssText = `display:block;position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;
-        border:1.5px dashed #f0c060;border-radius:3px;background:rgba(240,192,96,0.08);pointer-events:none;`;
-      selRect = { x, y, w, h };
-    }
-  };
-
-  const onUp = () => {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    draft.style.display = 'none';
-
-    if (!dragging || !selRect) return;
-
-    const dragon = getDragon();
-    if (!dragon) return;
-
-    // Find nodes overlapping selection rect
-    const selectedNodes = dragon.nodes.filter(n => {
-      const nw = n.w || 160, nh = n.h || 70;
-      return n.x < selRect.x + selRect.w &&
-             n.x + nw > selRect.x &&
-             n.y < selRect.y + selRect.h &&
-             n.y + nh > selRect.y;
-    }).map(n => n.id);
-
-    if (selectedNodes.length > 0) {
-      state.multiSelect = { nodes: selectedNodes, conns: [], regions: [] };
-      state.selectedNode = null;
-      state.selectedConn = null;
-      state.selectedRegion = null;
-      state._dragSelectJustEnded = true;
-      renderCanvas();
-      setStatus(`已框選 ${selectedNodes.length} 個節點 — 按 Del 一次刪除`);
-    }
-  };
-
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
-});
-
-// ─── Keyboard shortcuts ───────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   if (e.key === 'p' || e.key === 'P') { togglePreview(); return; }
@@ -2026,20 +1779,15 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Delete' || e.key === 'Backspace') {
     const dragon = getDragon();
     if (!dragon) return;
-
-    // Multi-select delete takes priority
     const ms = state.multiSelect;
     if (ms.nodes.length || ms.conns.length || ms.regions.length) {
       dragon.nodes       = dragon.nodes.filter(n => !ms.nodes.includes(n.id));
-      dragon.connections = dragon.connections.filter(c =>
-        !ms.conns.includes(c.id) && !ms.nodes.includes(c.from) && !ms.nodes.includes(c.to)
-      );
+      dragon.connections = dragon.connections.filter(c => !ms.conns.includes(c.id) && !ms.nodes.includes(c.from) && !ms.nodes.includes(c.to));
       dragon.regions     = (dragon.regions||[]).filter(r => !ms.regions.includes(r.id));
       state.multiSelect  = { nodes: [], conns: [], regions: [] };
       renderCanvas();
       return;
     }
-
     if (state.selectedNode) {
       dragon.nodes = dragon.nodes.filter(n => n.id !== state.selectedNode);
       dragon.connections = dragon.connections.filter(c => c.from !== state.selectedNode && c.to !== state.selectedNode);
@@ -2057,7 +1805,6 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// ─── Export JSON ──────────────────────────────────────────────────────────────
 function exportJSON() {
   const data = { dragons: state.dragons, activeDragon: state.activeDragon, nextId: state.nextId };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -2068,7 +1815,6 @@ function exportJSON() {
   setStatus('✓ data.json 已下載，請上傳到 GitHub repo 根目錄覆蓋舊檔');
 }
 
-// ─── Auto-load from data.json (GitHub Pages) ─────────────────────────────────
 async function loadFromDataJson() {
   try {
     const res = await fetch('data.json?t=' + Date.now());
@@ -2083,23 +1829,14 @@ async function loadFromDataJson() {
   } catch(e) { return false; }
 }
 
-// ─── Share via URL Hash ───────────────────────────────────────────────────────
 function shareLink() {
   try {
     const data = { dragons: state.dragons, activeDragon: state.activeDragon, nextId: state.nextId };
     const json = JSON.stringify(data);
-    // URL-safe base64: replace +→- /→_ and strip = padding
-    const compressed = btoa(encodeURIComponent(json))
-      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    const compressed = btoa(encodeURIComponent(json)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
     const url = location.href.split('#')[0] + '#data=' + compressed;
-    navigator.clipboard.writeText(url).then(() => {
-      setStatus('✓ 分享連結已複製到剪貼簿！貼給對方就能看到你的流程圖');
-    }).catch(() => {
-      prompt('請手動複製這個連結：', url);
-    });
-  } catch(e) {
-    setStatus('⚠ 資料太大，無法產生連結，請改用匯出 PNG');
-  }
+    navigator.clipboard.writeText(url).then(() => { setStatus('✓ 分享連結已複製到剪貼簿！貼給對方就能看到你的流程圖'); }).catch(() => { prompt('請手動複製這個連結：', url); });
+  } catch(e) { setStatus('⚠ 資料太大，無法產生連結，請改用匯出 PNG'); }
 }
 
 function loadFromHash() {
@@ -2107,7 +1844,6 @@ function loadFromHash() {
     const hash = location.hash;
     if (!hash.startsWith('#data=')) return false;
     const raw = hash.slice(6);
-    // Restore URL-safe base64 back to standard base64
     const b64 = raw.replace(/-/g, '+').replace(/_/g, '/');
     const padded = b64 + '=='.slice(0, (4 - b64.length % 4) % 4);
     const json = decodeURIComponent(atob(padded));
@@ -2121,18 +1857,9 @@ function loadFromHash() {
   } catch(e) { return false; }
 }
 
-// ─── Persistence (localStorage) ──────────────────────────────────────────────
 const SAVE_KEY = 'dragonflow_v1';
-
 function saveToStorage() {
-  try {
-    const data = {
-      dragons: state.dragons,
-      activeDragon: state.activeDragon,
-      nextId: state.nextId,
-    };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-  } catch(e) {}
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ dragons: state.dragons, activeDragon: state.activeDragon, nextId: state.nextId })); } catch(e) {}
 }
 
 function loadFromStorage() {
@@ -2141,7 +1868,6 @@ function loadFromStorage() {
     if (!raw) return false;
     const data = JSON.parse(raw);
     if (!data.dragons || !data.dragons.length) return false;
-    // Migrate: ensure regions array exists on each dragon
     data.dragons.forEach(d => { if (!d.regions) d.regions = []; });
     state.dragons = data.dragons;
     state.activeDragon = data.activeDragon;
@@ -2150,21 +1876,11 @@ function loadFromStorage() {
   } catch(e) { return false; }
 }
 
-// Auto-save: debounced 800ms after any change
 let _saveTimer = null;
-function scheduleSave() {
-  clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(saveToStorage, 800);
-}
-
-// Patch renderCanvas to trigger auto-save after every render
+function scheduleSave() { clearTimeout(_saveTimer); _saveTimer = setTimeout(saveToStorage, 800); }
 const _origRenderCanvas = renderCanvas;
-renderCanvas = function() {
-  _origRenderCanvas();
-  scheduleSave();
-};
+renderCanvas = function() { _origRenderCanvas(); scheduleSave(); };
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
 (async () => {
   const fromJson    = await loadFromDataJson();
   const fromHash    = !fromJson && loadFromHash();
