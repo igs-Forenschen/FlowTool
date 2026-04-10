@@ -892,49 +892,49 @@ function startEndpointDrag(e, conn, which) {
 
     let targetNode = null;
     let minDist = Infinity;
+    const pad = 40;
 
-    // 尋找游標附近的節點 (加長判定範圍)
+    // 搜尋節點
     dragon.nodes.forEach(n => {
       const nw = n.w || 160, nh = n.h || 70;
-      const pad = 40; 
       if (mx >= n.x - pad && mx <= n.x + nw + pad &&
           my >= n.y - pad && my <= n.y + nh + pad) {
-         const cx = n.x + nw/2;
-         const cy = n.y + nh/2;
-         const dist = Math.hypot(mx - cx, my - cy);
-         if (dist < minDist) {
-           minDist = dist;
-           targetNode = n;
-         }
+        const dist = Math.hypot(mx - (n.x + nw/2), my - (n.y + nh/2));
+        if (dist < minDist) { minDist = dist; targetNode = n; }
+      }
+    });
+
+    // 搜尋區域（當游標比節點更靠近區域時才選）
+    (dragon.regions || []).forEach(r => {
+      if (mx >= r.x - pad && mx <= r.x + r.w + pad &&
+          my >= r.y - pad && my <= r.y + r.h + pad) {
+        const dist = Math.hypot(mx - (r.x + r.w/2), my - (r.y + r.h/2));
+        if (dist < minDist) {
+          minDist = dist;
+          targetNode = { id: r.id, x: r.x, y: r.y, w: r.w, h: r.h, _isRegion: true };
+        }
       }
     });
 
     if (targetNode) {
       const side = nearestSide(targetNode, mx, my);
-      if (which === 'from') {
-        conn.from = targetNode.id;
-        conn.fromSide = side;
-      } else {
-        conn.to = targetNode.id;
-        conn.toSide = side;
-      }
-      conn.userPts = null;
-      conn.midOffset = null;
+      if (which === 'from') { conn.from = targetNode.id; conn.fromSide = side; }
+      else                  { conn.to   = targetNode.id; conn.toSide   = side; }
+      conn.userPts = null; conn.midOffset = null;
       renderConnections();
-      drawPortIndicators(targetNode, side); // renderConnections 後顯示點
+      drawPortIndicators(targetNode, side);
     } else {
-       // 如果拖到空地，保持在原本的節點上預覽
-       const fallbackNodeId = which === 'from' ? conn.from : conn.to;
-       const cNode = dragon.nodes.find(n => n.id === fallbackNodeId);
-       if (cNode) {
-         const side = nearestSide(cNode, mx, my);
-         if (which === 'from') conn.fromSide = side;
-         else conn.toSide = side;
-         conn.userPts = null;
-         conn.midOffset = null;
-         renderConnections();
-         drawPortIndicators(cNode, side);
-       }
+      // 拖到空地：用 resolveEndpoint 找回當前端點預覽
+      const fallbackId = which === 'from' ? conn.from : conn.to;
+      const fallback = resolveEndpoint(dragon, fallbackId);
+      if (fallback) {
+        const side = nearestSide(fallback, mx, my);
+        if (which === 'from') conn.fromSide = side;
+        else conn.toSide = side;
+        conn.userPts = null; conn.midOffset = null;
+        renderConnections();
+        drawPortIndicators(fallback, side);
+      }
     }
   };
 
@@ -944,7 +944,7 @@ function startEndpointDrag(e, conn, which) {
     renderCanvas();
     const finalSide = which === 'from' ? conn.fromSide : conn.toSide;
     const sideNames = { right:'右側', left:'左側', top:'上方', bottom:'下方' };
-    setStatus(`已重新連接至「${sideNames[finalSide]}」`);
+    setStatus(`已重新連接至「${sideNames[finalSide] || finalSide}」`);
   };
 
   document.addEventListener('mousemove', onMove);
@@ -1762,18 +1762,72 @@ function openTextEdit(txtId) {
   const txt = dragon.texts.find(t => t.id === txtId);
   if (!txt) return;
   state.editingText = txtId;
-  document.getElementById('text-edit-content').value = txt.content;
-  showModal('modal-text-edit');
-  setTimeout(() => document.getElementById('text-edit-content').focus(), 50);
+
+  // Find the div in text-layer by index (same order as dragon.texts)
+  const layer = document.getElementById('text-layer');
+  if (!layer) return;
+  const idx = dragon.texts.findIndex(t => t.id === txtId);
+  const div = layer.children[idx];
+  if (!div) return;
+
+  // Make inline editable
+  div.contentEditable = 'true';
+  div.style.outline = '1.5px solid #7eb8f0';
+  div.style.cursor = 'text';
+  div.style.userSelect = 'text';
+  div.textContent = txt.content; // ensure content is current
+  div.focus();
+
+  // Select all
+  const range = document.createRange();
+  range.selectNodeContents(div);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    const val = div.textContent.trim();
+    div.contentEditable = 'false';
+    state.editingText = null;
+    if (!val) {
+      dragon.texts = dragon.texts.filter(t => t.id !== txtId);
+    } else {
+      txt.content = val;
+    }
+    setMode('select'); // 切回選取模式（會呼叫 renderCanvas）
+  };
+
+  div.addEventListener('keydown', ev => {
+    ev.stopPropagation(); // 避免觸發 Del 等全域快捷鍵
+    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); finish(); }
+    if (ev.key === 'Escape') {
+      finished = true;
+      div.contentEditable = 'false';
+      state.editingText = null;
+      renderTexts();
+    }
+  });
+
+  div.addEventListener('blur', finish, { once: true });
 }
 
 function saveTextItem() {
   const dragon = getDragon();
   const txt = dragon.texts.find(t => t.id === state.editingText);
   if (!txt) return;
-  txt.content = document.getElementById('text-edit-content').value;
+  const val = document.getElementById('text-edit-content').value.trim();
+  if (!val) {
+    // 空白就刪掉
+    dragon.texts = dragon.texts.filter(t => t.id !== state.editingText);
+  } else {
+    txt.content = val;
+  }
+  state.editingText = null;
   hideModal('modal-text-edit');
-  renderTexts();
+  setMode('select'); // 儲存後自動切回選取模式
 }
 
 function deleteTextItem() {
@@ -1790,8 +1844,8 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
   if (state.preview) return;
   const validTargets = ['canvas-wrap', 'canvas', 'grid-bg'];
 
-  // Text placement mode
   if (state.mode === 'text' && validTargets.includes(e.target.id)) {
+    e.stopPropagation();
     const wrap = document.getElementById('canvas-wrap');
     const rect = wrap.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -1799,19 +1853,16 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
     const dragon = getDragon();
     if (!dragon) return;
     if (!dragon.texts) dragon.texts = [];
-    const newTxt = { id: uid(), content: '文字', x, y, size: 16 };
+    const newTxt = { id: uid(), content: '', x, y, size: 16 };
     dragon.texts.push(newTxt);
     state.selectedText = newTxt.id;
-    state.editingText = newTxt.id;
-    renderTexts();
-    // Open edit immediately
-    document.getElementById('text-edit-content').value = '文字';
-    showModal('modal-text-edit');
-    setTimeout(() => { const el = document.getElementById('text-edit-content'); el.focus(); el.select(); }, 50);
+    renderTexts(); // 先渲染，讓 div 存在
+    openTextEdit(newTxt.id); // 再對那個 div 開啟 inline 編輯
     return;
   }
 
   if (state.mode === 'select' && validTargets.includes(e.target.id)) {
+    if (state.editingText) return; // 編輯文字中，不攔截
     const wrap = document.getElementById('canvas-wrap');
     const rect = wrap.getBoundingClientRect();
     const startX = e.clientX - rect.left;
@@ -1986,6 +2037,7 @@ function deleteRegion() {
 document.getElementById('canvas-wrap').addEventListener('click', e => {
   const bg = ['canvas-wrap', 'canvas', 'grid-bg'];
   if (!bg.includes(e.target.id)) return;
+  if (state.editingText) return; // 編輯文字中，不要清除選取
   if (state._dragSelectJustEnded) { state._dragSelectJustEnded = false; return; }
   state.selectedNode = null;
   state.selectedConn = null;
