@@ -951,6 +951,15 @@ function startEndpointDrag(e, conn, which) {
   document.addEventListener('mouseup', onUp);
 }
 
+// 查找連線端點：節點或情境區域都可以作為端點
+function resolveEndpoint(dragon, id) {
+  const node = dragon.nodes.find(n => n.id === id);
+  if (node) return node;
+  const region = (dragon.regions || []).find(r => r.id === id);
+  if (region) return { id: region.id, x: region.x, y: region.y, w: region.w, h: region.h, _isRegion: true };
+  return null;
+}
+
 function renderCanvas() {
   const dragon = getDragon();
   const canvas = document.getElementById('canvas');
@@ -975,8 +984,8 @@ function renderCanvas() {
   renderRegions();
   renderTexts();
   dragon.connections.forEach(conn => {
-    const fromNode = dragon.nodes.find(n => n.id === conn.from);
-    const toNode = dragon.nodes.find(n => n.id === conn.to);
+    const fromNode = resolveEndpoint(dragon, conn.from);
+    const toNode   = resolveEndpoint(dragon, conn.to);
     if (!fromNode || !toNode) return;
     const fromFrac = conn.fromFrac ?? 0.5;
     const toFrac   = conn.toFrac   ?? 0.5;
@@ -1030,12 +1039,12 @@ function renderRegions() {
     const div = document.createElement('div');
     const isSel = state.selectedRegion === region.id;
     
+    const isConnSrc = state.connectFrom === region.id;
     div.style.cssText = `position:absolute;left:${region.x}px;top:${region.y}px;width:${region.w}px;height:${region.h}px;
-      background:${rc.bg}; border: 1.5px ${isSel ? 'solid' : 'dashed'} ${rc.border}; border-radius:12px;
-      box-sizing:border-box; cursor:pointer; pointer-events:auto;
+      background:${rc.bg}; border: 1.5px ${isSel ? 'solid' : 'dashed'} ${isConnSrc ? '#5dcaa5' : rc.border}; border-radius:12px;
+      box-sizing:border-box; cursor:${state.mode === 'connect' ? 'crosshair' : 'pointer'}; pointer-events:auto;
       backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
-      box-shadow: ${isSel ? `0 0 0 2px ${rc.border}, 0 4px 12px rgba(0,0,0,0.15)` : '0 4px 12px rgba(0,0,0,0.08)'};
-      transition: box-shadow 0.2s, border 0.2s;`;
+      box-shadow: ${isConnSrc ? '0 0 0 2px #5dcaa5' : isSel ? `0 0 0 2px ${rc.border}` : '0 4px 12px rgba(0,0,0,0.08)'};`;
       
     const tag = document.createElement('div');
     tag.style.cssText = `position:absolute;top:-1.5px;left:-1.5px;background:${rc.border};color:${rc.text};
@@ -1047,6 +1056,10 @@ function renderRegions() {
     div.appendChild(tag);
     div.addEventListener('click', e => {
       e.stopPropagation();
+      if (state.mode === 'connect') {
+        handleConnectClick(region.id);
+        return;
+      }
       state.selectedRegion = region.id;
       state.selectedNode = null;
       state.selectedConn = null;
@@ -1238,8 +1251,8 @@ function renderConnections() {
   if (svgTop) svgTop.innerHTML = '';
   if (!dragon) return;
   dragon.connections.forEach(conn => {
-    const fromNode = dragon.nodes.find(n => n.id === conn.from);
-    const toNode = dragon.nodes.find(n => n.id === conn.to);
+    const fromNode = resolveEndpoint(dragon, conn.from);
+    const toNode   = resolveEndpoint(dragon, conn.to);
     if (!fromNode || !toNode) return;
     const fromFrac = conn.fromFrac ?? 0.5;
     const toFrac   = conn.toFrac   ?? 0.5;
@@ -1621,7 +1634,6 @@ function onRegionDrag(e, regionId) {
            n.x + nw <= region.x + region.w &&
            n.y + nh <= region.y + region.h;
   });
-
   const containedTexts = (dragon.texts || []).filter(t =>
     t.x >= region.x && t.x <= region.x + region.w &&
     t.y >= region.y && t.y <= region.y + region.h
@@ -1631,12 +1643,22 @@ function onRegionDrag(e, regionId) {
   const origRegion = { x: region.x, y: region.y };
   const origNodes = contained.map(n => ({ id: n.id, x: n.x, y: n.y }));
   const origTexts = containedTexts.map(t => ({ id: t.id, x: t.x, y: t.y }));
+  let hasMoved = false;
 
   renderRegions();
 
   const onMove = ev => {
     const dx = ev.clientX - startX;
     const dy = ev.clientY - startY;
+    if (!hasMoved && Math.hypot(dx, dy) < 4) return;
+    if (!hasMoved) {
+      hasMoved = true;
+      // Clear userPts for connections involving this region or its contained nodes
+      const affectedIds = new Set([regionId, ...origNodes.map(n => n.id)]);
+      dragon.connections.forEach(c => {
+        if (affectedIds.has(c.from) || affectedIds.has(c.to)) { c.userPts = null; c.midOffset = null; }
+      });
+    }
     region.x = origRegion.x + dx;
     region.y = origRegion.y + dy;
     origNodes.forEach(o => {
@@ -1647,8 +1669,7 @@ function onRegionDrag(e, regionId) {
       const el = document.getElementById('node-' + o.id);
       if (el) {
         const node = dragon.nodes.find(n => n.id === o.id);
-        el.style.left = node.x + 'px';
-        el.style.top  = node.y + 'px';
+        el.style.left = node.x + 'px'; el.style.top = node.y + 'px';
       }
     });
     origTexts.forEach(o => {
@@ -1953,6 +1974,7 @@ function deleteRegion() {
   customConfirm('確定刪除此情境區域？（節點不會被刪除）', '刪除', () => {
     const dragon = getDragon();
     if (!dragon) return;
+    dragon.connections = dragon.connections.filter(c => c.from !== state.editingRegion && c.to !== state.editingRegion);
     dragon.regions = (dragon.regions || []).filter(r => r.id !== state.editingRegion);
     state.editingRegion = null;
     state.selectedRegion = null;

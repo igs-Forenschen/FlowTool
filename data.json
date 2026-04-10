@@ -1,342 +1,82 @@
 {
   "dragons": [
     {
-      "id": "n2",
-      "name": "Small_PurpleDragon",
-      "nodes": [],
-      "connections": [],
-      "regions": []
-    },
-    {
-      "id": "n32",
-      "name": "金剛測試",
+      "id": "n65",
+      "name": "火龍",
       "nodes": [
         {
-          "id": "n33",
-          "name": "InGame",
+          "id": "n66",
+          "name": "Big_FlameDragon_fly_01",
           "cat": "其他",
-          "x": 59,
-          "y": 240,
+          "x": 265,
+          "y": 158,
           "notes": "",
-          "w": 150,
+          "w": 183,
           "h": 38
         },
         {
-          "id": "n34",
-          "name": "standby",
+          "id": "n67",
+          "name": "Big_FlameDragon_fly_02",
           "cat": "其他",
-          "x": 327,
-          "y": 240,
+          "x": 261,
+          "y": 257,
           "notes": "",
-          "w": 150,
+          "w": 183,
           "h": 38
         },
         {
-          "id": "n35",
-          "name": "leave",
+          "id": "n68",
+          "name": "Big_FlameDragon_Hit_01",
           "cat": "其他",
-          "x": 327,
-          "y": 89,
+          "x": 585,
+          "y": 215,
           "notes": "",
-          "w": 150,
-          "h": 38
-        },
-        {
-          "id": "n36",
-          "name": "Walk",
-          "cat": "移動",
-          "x": 672,
-          "y": 240,
-          "notes": "",
-          "w": 150,
-          "h": 38
-        },
-        {
-          "id": "n37",
-          "name": "idle_01 / idle_01_1 / idle_02",
-          "cat": "其他",
-          "x": 302,
-          "y": 408,
-          "notes": "",
-          "w": 200,
-          "h": 56
-        },
-        {
-          "id": "n38",
-          "name": "idle_03",
-          "cat": "其他",
-          "x": 672,
-          "y": 427,
-          "notes": "",
-          "w": 150,
-          "h": 38
-        },
-        {
-          "id": "n39",
-          "name": "hit_s / hit_l",
-          "cat": "其他",
-          "x": 914,
-          "y": 239,
-          "notes": "",
-          "w": 150,
-          "h": 38
-        },
-        {
-          "id": "n40",
-          "name": "Charged Jump",
-          "cat": "其他",
-          "x": 952,
-          "y": 482,
-          "notes": "",
-          "w": 150,
-          "h": 38
-        },
-        {
-          "id": "n41",
-          "name": "slide",
-          "cat": "其他",
-          "x": 1243,
-          "y": 239,
-          "notes": "",
-          "w": 150,
-          "h": 38
-        },
-        {
-          "id": "n42",
-          "name": "die / slide+die",
-          "cat": "死亡",
-          "x": 1268,
-          "y": 417,
-          "notes": "",
-          "w": 150,
-          "h": 38
-        },
-        {
-          "id": "n55",
-          "name": "Top",
-          "cat": "其他",
-          "x": 420,
-          "y": 612,
-          "notes": "",
-          "w": 150,
-          "h": 38
-        },
-        {
-          "id": "n56",
-          "name": "T_standby",
-          "cat": "其他",
-          "x": 687,
-          "y": 612,
-          "notes": "",
-          "w": 150,
-          "h": 38
-        },
-        {
-          "id": "n57",
-          "name": "T_hit_s / T_hit_l",
-          "cat": "其他",
-          "x": 935,
-          "y": 612,
-          "notes": "",
-          "w": 150,
-          "h": 38
-        },
-        {
-          "id": "n58",
-          "name": "T_leave",
-          "cat": "其他",
-          "x": 1176,
-          "y": 553,
-          "notes": "",
-          "w": 150,
-          "h": 38
-        },
-        {
-          "id": "n59",
-          "name": "T_die",
-          "cat": "其他",
-          "x": 1177,
-          "y": 667,
-          "notes": "",
-          "w": 150,
+          "w": 183,
           "h": 38
         }
       ],
       "connections": [
         {
-          "id": "c43",
-          "from": "n33",
-          "to": "n34",
+          "id": "c72",
+          "from": "n67",
+          "to": "n66",
           "label": "",
-          "dir": "forward",
+          "dir": "backward",
           "color": "blue",
           "shape": "diamond",
-          "samePose": true
+          "samePose": true,
+          "userPts": null,
+          "midOffset": null,
+          "toSide": "right",
+          "fromSide": "right"
         },
         {
-          "id": "c44",
-          "from": "n34",
-          "to": "n36",
-          "label": "",
-          "dir": "forward",
-          "color": "blue",
-          "shape": "diamond",
-          "samePose": true
-        },
-        {
-          "id": "c45",
-          "from": "n34",
-          "to": "n35",
-          "label": "",
-          "dir": "forward",
-          "color": "blue",
-          "shape": "diamond",
-          "samePose": true
-        },
-        {
-          "id": "c46",
-          "from": "n36",
-          "to": "n39",
-          "label": "",
-          "dir": "forward",
-          "color": "blue",
-          "shape": "diamond",
-          "samePose": false
-        },
-        {
-          "id": "c47",
-          "from": "n39",
-          "to": "n41",
-          "label": "",
-          "dir": "forward",
-          "color": "red",
-          "shape": "diamond",
-          "samePose": false
-        },
-        {
-          "id": "c48",
-          "from": "n39",
-          "to": "n42",
-          "label": "",
-          "dir": "forward",
-          "color": "red",
-          "shape": "diamond",
-          "samePose": false
-        },
-        {
-          "id": "c49",
-          "from": "n34",
-          "to": "n37",
-          "label": "",
-          "dir": "forward",
-          "color": "blue",
-          "shape": "diamond",
-          "samePose": true
-        },
-        {
-          "id": "c50",
-          "from": "n37",
-          "to": "n36",
-          "label": "",
-          "dir": "forward",
-          "color": "blue",
-          "shape": "diamond",
-          "samePose": true
-        },
-        {
-          "id": "c51",
-          "from": "n36",
-          "to": "n38",
-          "label": "",
-          "dir": "forward",
-          "color": "blue",
-          "shape": "diamond",
-          "samePose": true
-        },
-        {
-          "id": "c52",
-          "from": "n36",
-          "to": "n40",
-          "label": "",
-          "dir": "forward",
-          "color": "blue",
-          "shape": "diamond",
-          "samePose": true
-        },
-        {
-          "id": "c53",
-          "from": "n40",
-          "to": "n41",
+          "id": "c73",
+          "from": "n67",
+          "to": "n66",
           "label": "",
           "dir": "forward",
           "color": "green",
-          "shape": "none",
-          "samePose": false
-        },
-        {
-          "id": "c54",
-          "from": "n40",
-          "to": "n42",
-          "label": "",
-          "dir": "forward",
-          "color": "green",
-          "shape": "none",
-          "samePose": false
-        },
-        {
-          "id": "c60",
-          "from": "n38",
-          "to": "n55",
-          "label": "",
-          "dir": "forward",
-          "color": "amber",
-          "shape": "none",
-          "samePose": true
-        },
-        {
-          "id": "c61",
-          "from": "n55",
-          "to": "n56",
-          "label": "",
-          "dir": "forward",
-          "color": "amber",
-          "shape": "star4",
-          "samePose": true
-        },
-        {
-          "id": "c62",
-          "from": "n56",
-          "to": "n57",
-          "label": "",
-          "dir": "forward",
-          "color": "amber",
-          "shape": "star4",
-          "samePose": true
-        },
-        {
-          "id": "c63",
-          "from": "n57",
-          "to": "n58",
-          "label": "",
-          "dir": "forward",
-          "color": "amber",
-          "shape": "star4",
-          "samePose": true
-        },
-        {
-          "id": "c64",
-          "from": "n57",
-          "to": "n59",
-          "label": "",
-          "dir": "forward",
-          "color": "amber",
-          "shape": "star4",
-          "samePose": true
+          "shape": "diamond",
+          "samePose": true,
+          "fromSide": "left",
+          "userPts": null,
+          "midOffset": null,
+          "toSide": "left"
         }
       ],
-      "regions": []
+      "regions": [],
+      "texts": [
+        {
+          "id": "n77",
+          "content": "常駐使用fly01，隨機播放fly02\n兩者頭尾幀可以相接",
+          "x": 254,
+          "y": 80,
+          "size": 16
+        }
+      ]
     }
   ],
-  "activeDragon": "n32",
-  "nextId": 65
+  "activeDragon": "n65",
+  "nextId": 79
 }
