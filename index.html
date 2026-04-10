@@ -1641,6 +1641,7 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
       state.selectedNode = null;
       state.selectedConn = null;
       state.selectedRegion = null;
+      state._dragSelectJustEnded = true;
       renderCanvas();
       setStatus(`已框選 ${selNodes.length} 個節點、${selConns.length} 條連線、${selRegions.length} 個情境 — 按 Del 全部刪除`);
     };
