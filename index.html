@@ -108,6 +108,7 @@ body.preview-mode .node { cursor: default !important; }
       <button id="btn-select" class="btn active" onclick="setMode('select')" title="選取 / 移動節點">▣ 選取</button>
       <button id="btn-connect" class="btn" onclick="setMode('connect')" title="點兩個節點建立連線">⇢ 連線</button>
       <button id="btn-region" class="btn" onclick="setMode('region')" title="拖拉框選範圍，建立情境標籤">⬚ 框選情境</button>
+      <button id="btn-text" class="btn" onclick="setMode('text')" title="點畫布建立文字 (T)">T 文字</button>
       <div class="sep"></div>
       <button class="btn" onclick="showImport()">貼上動作</button>
       <button class="btn" onclick="copyNode()" title="複製選取的節點 (Ctrl+D)">複製節點</button>
@@ -125,6 +126,7 @@ body.preview-mode .node { cursor: default !important; }
     <div id="canvas-wrap">
       <div id="grid-bg"></div>
       <div id="regions-layer"></div>
+      <div id="text-layer" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:3;"></div>
       <div id="canvas"></div>
       <svg id="svg-conn"><defs id="svg-defs"></defs></svg>
       <svg id="svg-top" style="position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:5;"></svg>
@@ -293,6 +295,23 @@ body.preview-mode .node { cursor: default !important; }
   </div>
 </div>
 
+<!-- Text Edit Modal -->
+<div id="modal-text-edit" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">編輯文字</div>
+    <div style="margin-bottom:12px">
+      <label class="modal-label">內容</label>
+      <textarea class="modal-input" id="text-edit-content" rows="4" placeholder="輸入文字內容…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();saveTextItem();}"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn danger" onclick="deleteTextItem()">刪除</button>
+      <div style="flex:1"></div>
+      <button class="btn" onclick="hideModal('modal-text-edit')">取消</button>
+      <button class="btn primary" onclick="saveTextItem()">儲存</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ─── Custom confirm (replaces browser confirm() which is blocked in file://) ──
 let _confirmCb = null;
@@ -394,7 +413,7 @@ let state = {
   selectedNode: null,
   selectedConn: null,
   selectedRegion: null,
-  multiSelect: { nodes: [], conns: [], regions: [] },
+  multiSelect: { nodes: [], conns: [], regions: [], texts: [] },
   editingNode: null,
   editingConn: null,
   editingRegion: null,
@@ -409,6 +428,8 @@ let state = {
   editingConnShape: 'diamond',
   selectedConnSamePose: false,
   editingConnSamePose: false,
+  selectedText: null,
+  editingText: null,
   nextId: 1,
   lastClickTime: 0,
   lastClickTarget: null,
@@ -917,8 +938,8 @@ function renderCanvas() {
     canvas.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#666;font-size:15px;background:#1a1a26;padding:16px 24px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:1px solid #333;">點擊上方的「貼上動作」新增節點</div>';
   }
 
-  renderRegions(); 
-
+  renderRegions();
+  renderTexts();
   dragon.connections.forEach(conn => {
     const fromNode = dragon.nodes.find(n => n.id === conn.from);
     const toNode = dragon.nodes.find(n => n.id === conn.to);
@@ -927,7 +948,6 @@ function renderCanvas() {
     const toFrac   = conn.toFrac   ?? 0.5;
     drawConnection(svg, conn, fromNode, toNode, fromFrac, toFrac);
   });
-
   dragon.nodes.forEach(node => {
     const cat = CATS[node.cat] || CATS['其他'];
     const div = document.createElement('div');
@@ -1009,7 +1029,7 @@ function addDragon() {
   const inp = document.getElementById('new-dragon-name');
   const name = inp.value.trim() || `龍 ${state.dragons.length + 1}`;
   const id = uid();
-  state.dragons.push({ id, name, nodes: [], connections: [], regions: [] });
+  state.dragons.push({ id, name, nodes: [], connections: [], regions: [], texts: [] });
   inp.value = '';
   setActiveDragon(id);
 }
@@ -1019,7 +1039,7 @@ function setActiveDragon(id) {
   state.selectedNode = null;
   state.selectedConn = null;
   state.selectedRegion = null;
-  state.multiSelect = { nodes: [], conns: [], regions: [] };
+  state.multiSelect = { nodes: [], conns: [], regions: [], texts: [] };
   renderSidebar();
   renderCanvas();
 }
@@ -1077,12 +1097,14 @@ function setMode(mode) {
   document.getElementById('btn-select').classList.toggle('active', mode === 'select');
   document.getElementById('btn-connect').classList.toggle('active', mode === 'connect');
   document.getElementById('btn-region').classList.toggle('active', mode === 'region');
+  document.getElementById('btn-text').classList.toggle('active', mode === 'text');
   const wrap = document.getElementById('canvas-wrap');
-  wrap.style.cursor = mode === 'connect' ? 'crosshair' : mode === 'region' ? 'crosshair' : 'default';
+  wrap.style.cursor = mode === 'connect' ? 'crosshair' : mode === 'region' ? 'crosshair' : mode === 'text' ? 'text' : 'default';
   const msgs = {
     select: '選取模式 — 拖曳節點移動，雙擊節點編輯',
     connect: '連線模式 — 點第一個節點，再點第二個節點建立連線',
     region: '框選情境模式 — 在畫布空白處拖拉框選範圍，然後輸入情境名稱',
+    text: '文字模式 — 點畫布任意位置放置文字 (T)',
   };
   setStatus(msgs[mode] || '');
   renderCanvas();
@@ -1103,18 +1125,23 @@ function onNodeMousedown(e, nodeId) {
 
   if (isInMultiSelect && state.multiSelect.nodes.length > 1) {
     const nodeIds = state.multiSelect.nodes;
-    dragon.connections.forEach(c => {
-      if (nodeIds.includes(c.from) || nodeIds.includes(c.to)) { c.userPts = null; c.midOffset = null; }
-    });
     const origPositions = nodeIds.map(id => {
       const n = dragon.nodes.find(n => n.id === id);
       return { id, x: n.x, y: n.y };
     });
     const startMouseX = e.clientX, startMouseY = e.clientY;
+    let hasMoved = false;
 
     const onMove = ev => {
       const dx = ev.clientX - startMouseX;
       const dy = ev.clientY - startMouseY;
+      if (!hasMoved && Math.hypot(dx, dy) < 4) return;
+      if (!hasMoved) {
+        hasMoved = true;
+        dragon.connections.forEach(c => {
+          if (nodeIds.includes(c.from) || nodeIds.includes(c.to)) { c.userPts = null; c.midOffset = null; }
+        });
+      }
       origPositions.forEach(o => {
         const n = dragon.nodes.find(n => n.id === o.id);
         if (!n) return;
@@ -1133,20 +1160,25 @@ function onNodeMousedown(e, nodeId) {
 
   state.selectedNode = nodeId;
   state.selectedConn = null;
-  state.multiSelect = { nodes: [], conns: [], regions: [] };
+  state.multiSelect = { nodes: [], conns: [], regions: [], texts: [] };
 
   const node = dragon.nodes.find(n => n.id === nodeId);
-  dragon.connections.forEach(c => {
-    if (c.from === nodeId || c.to === nodeId) { c.userPts = null; c.midOffset = null; }
-  });
-
   state.dragging = { nodeId, startMouseX: e.clientX, startMouseY: e.clientY, startNodeX: node.x, startNodeY: node.y };
   renderCanvas();
 
+  let hasMoved = false;
   const onMove = ev => {
     if (!state.dragging) return;
     const dx = ev.clientX - state.dragging.startMouseX;
     const dy = ev.clientY - state.dragging.startMouseY;
+    if (!hasMoved && Math.hypot(dx, dy) < 4) return; // ignore tiny jitter
+    if (!hasMoved) {
+      // Only reset connections on actual drag start, not on click
+      hasMoved = true;
+      dragon.connections.forEach(c => {
+        if (c.from === nodeId || c.to === nodeId) { c.userPts = null; c.midOffset = null; }
+      });
+    }
     node.x = Math.max(0, state.dragging.startNodeX + dx);
     node.y = Math.max(0, state.dragging.startNodeY + dy);
     const el = document.getElementById('node-' + nodeId);
@@ -1427,51 +1459,6 @@ function exportPNG() {
     }
   });
 
-  dragon.connections.forEach(conn => {
-    const fn = dragon.nodes.find(n => n.id === conn.from);
-    const tn = dragon.nodes.find(n => n.id === conn.to);
-    if (!fn || !tn) return;
-
-    const fnO = { ...fn, x: fn.x+ox, y: fn.y+oy };
-    const tnO = { ...tn, x: tn.x+ox, y: tn.y+oy };
-    const { pts } = orthoRoute(fnO, tnO, conn.fromFrac ?? 0.5, conn.toFrac ?? 0.5, conn.fromSide || null, conn.toSide || null, conn.midOffset ?? null);
-
-    const cObj = CONN_COLORS.find(c => c.id === (conn.color||'blue'));
-    const lineColor = cObj ? cObj.stroke : '#4a90d9';
-
-    ctx.strokeStyle = lineColor;
-    ctx.lineWidth = 2.5;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    
-    if (pts.length > 0) ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length - 1; i++) {
-       ctx.arcTo(pts[i].x, pts[i].y, pts[i+1].x, pts[i+1].y, 14);
-    }
-    if (pts.length > 1) ctx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
-    ctx.stroke();
-
-    const fp = pts[0], tp = pts[pts.length-1];
-    pngDiamond(fp.x, fp.y, lineColor);
-    pngDiamond(tp.x, tp.y, lineColor);
-
-    // PNG 端點箭頭繪製
-    const ptsLen = pts.length;
-    if (ptsLen > 1) {
-      if (conn.dir==='forward'||conn.dir==='both') {
-        const prev = pts[ptsLen - 2], curr = pts[ptsLen - 1];
-        const angle = Math.atan2(curr.y - prev.y, curr.x - prev.x);
-        pngEndpointArrow(curr.x, curr.y, angle, lineColor);
-      }
-      if (conn.dir==='backward'||conn.dir==='both') {
-        const curr = pts[0], next = pts[1];
-        const angle = Math.atan2(curr.y - next.y, curr.x - next.x);
-        pngEndpointArrow(curr.x, curr.y, angle, lineColor);
-      }
-    }
-  });
-
   ctx.fillStyle = '#555';
   ctx.font = '11px Segoe UI, sans-serif';
   ctx.textAlign = 'left';
@@ -1601,9 +1588,15 @@ function onRegionDrag(e, regionId) {
            n.y + nh <= region.y + region.h;
   });
 
+  const containedTexts = (dragon.texts || []).filter(t =>
+    t.x >= region.x && t.x <= region.x + region.w &&
+    t.y >= region.y && t.y <= region.y + region.h
+  );
+
   const startX = e.clientX, startY = e.clientY;
   const origRegion = { x: region.x, y: region.y };
   const origNodes = contained.map(n => ({ id: n.id, x: n.x, y: n.y }));
+  const origTexts = containedTexts.map(t => ({ id: t.id, x: t.x, y: t.y }));
 
   renderRegions();
 
@@ -1624,7 +1617,12 @@ function onRegionDrag(e, regionId) {
         el.style.top  = node.y + 'px';
       }
     });
+    origTexts.forEach(o => {
+      const txt = (dragon.texts || []).find(t => t.id === o.id);
+      if (txt) { txt.x = o.x + dx; txt.y = o.y + dy; }
+    });
     renderRegions();
+    renderTexts();
     renderConnections();
   };
   const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
@@ -1632,9 +1630,131 @@ function onRegionDrag(e, regionId) {
   document.addEventListener('mouseup', onUp);
 }
 
+// ─── Text Items ───────────────────────────────────────────────────────────────
+function renderTexts() {
+  const dragon = getDragon();
+  const layer = document.getElementById('text-layer');
+  if (!layer || !dragon) return;
+  layer.innerHTML = '';
+  if (!dragon.texts) return;
+  dragon.texts.forEach(txt => {
+    const div = document.createElement('div');
+    const isSel = state.selectedText === txt.id;
+    div.style.cssText = `position:absolute;left:${txt.x}px;top:${txt.y}px;
+      color:#e2e0d8;font-family:'Segoe UI','PingFang TC',sans-serif;
+      font-size:${txt.size || 16}px;font-weight:${txt.bold ? '600' : '400'};
+      white-space:pre-wrap;cursor:move;user-select:none;pointer-events:auto;
+      outline:${isSel ? '1.5px dashed #7eb8f0' : 'none'};
+      padding:2px 4px;border-radius:3px;`;
+    div.textContent = txt.content;
+    div.addEventListener('mousedown', e => { e.stopPropagation(); onTextMousedown(e, txt.id); });
+    div.addEventListener('dblclick', e => { e.stopPropagation(); openTextEdit(txt.id); });
+    // Resize handle (bottom-right corner)
+    if (isSel) {
+      const rh = document.createElement('div');
+      rh.style.cssText = `position:absolute;right:-10px;bottom:-10px;width:14px;height:14px;
+        background:#7eb8f0;border-radius:50%;cursor:se-resize;pointer-events:auto;`;
+      rh.addEventListener('mousedown', e => { e.stopPropagation(); onTextResize(e, txt.id); });
+      div.appendChild(rh);
+    }
+    layer.appendChild(div);
+  });
+}
+
+function onTextMousedown(e, txtId) {
+  if (state.preview) return;
+  state.selectedText = txtId;
+  state.selectedNode = null; state.selectedConn = null; state.selectedRegion = null;
+  state.multiSelect = { nodes: [], conns: [], regions: [], texts: [] };
+  renderTexts();
+  setStatus('已選取文字 — 雙擊編輯，Del 刪除，拖曳右下角縮放字體');
+
+  const dragon = getDragon();
+  const txt = dragon.texts.find(t => t.id === txtId);
+  if (!txt) return;
+  const startX = e.clientX, startY = e.clientY;
+  const origX = txt.x, origY = txt.y;
+  const onMove = ev => {
+    txt.x = origX + ev.clientX - startX;
+    txt.y = origY + ev.clientY - startY;
+    const layer = document.getElementById('text-layer');
+    const el = layer && layer.children[Array.from(layer.children).findIndex(c => parseInt(c.style.left) === origX && parseInt(c.style.top) === origY)];
+    renderTexts();
+  };
+  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function onTextResize(e, txtId) {
+  const dragon = getDragon();
+  const txt = dragon.texts.find(t => t.id === txtId);
+  if (!txt) return;
+  const startY = e.clientY;
+  const origSize = txt.size || 16;
+  const onMove = ev => {
+    const dy = ev.clientY - startY;
+    txt.size = Math.max(8, Math.min(120, origSize + dy * 0.5));
+    renderTexts();
+  };
+  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function openTextEdit(txtId) {
+  const dragon = getDragon();
+  const txt = dragon.texts.find(t => t.id === txtId);
+  if (!txt) return;
+  state.editingText = txtId;
+  document.getElementById('text-edit-content').value = txt.content;
+  showModal('modal-text-edit');
+  setTimeout(() => document.getElementById('text-edit-content').focus(), 50);
+}
+
+function saveTextItem() {
+  const dragon = getDragon();
+  const txt = dragon.texts.find(t => t.id === state.editingText);
+  if (!txt) return;
+  txt.content = document.getElementById('text-edit-content').value;
+  hideModal('modal-text-edit');
+  renderTexts();
+}
+
+function deleteTextItem() {
+  const dragon = getDragon();
+  if (!dragon) return;
+  dragon.texts = dragon.texts.filter(t => t.id !== state.editingText);
+  state.editingText = null;
+  state.selectedText = null;
+  hideModal('modal-text-edit');
+  renderTexts();
+}
+
 document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
   if (state.preview) return;
   const validTargets = ['canvas-wrap', 'canvas', 'grid-bg'];
+
+  // Text placement mode
+  if (state.mode === 'text' && validTargets.includes(e.target.id)) {
+    const wrap = document.getElementById('canvas-wrap');
+    const rect = wrap.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const dragon = getDragon();
+    if (!dragon) return;
+    if (!dragon.texts) dragon.texts = [];
+    const newTxt = { id: uid(), content: '文字', x, y, size: 16 };
+    dragon.texts.push(newTxt);
+    state.selectedText = newTxt.id;
+    state.editingText = newTxt.id;
+    renderTexts();
+    // Open edit immediately
+    document.getElementById('text-edit-content').value = '文字';
+    showModal('modal-text-edit');
+    setTimeout(() => { const el = document.getElementById('text-edit-content'); el.focus(); el.select(); }, 50);
+    return;
+  }
 
   if (state.mode === 'select' && validTargets.includes(e.target.id)) {
     const wrap = document.getElementById('canvas-wrap');
@@ -1677,21 +1797,23 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
 
       const selConns = dragon.connections.filter(c => selNodes.includes(c.from) && selNodes.includes(c.to)).map(c => c.id);
       const selRegions = (dragon.regions || []).filter(r => r.x < sx+sw && r.x+r.w > sx && r.y < sy+sh && r.y+r.h > sy).map(r => r.id);
+      const selTexts = (dragon.texts || []).filter(t => t.x > sx && t.x < sx+sw && t.y > sy && t.y < sy+sh).map(t => t.id);
 
-      const total = selNodes.length + selConns.length + selRegions.length;
+      const total = selNodes.length + selConns.length + selRegions.length + selTexts.length;
       if (total === 0) {
-        state.multiSelect = { nodes: [], conns: [], regions: [] };
+        state.multiSelect = { nodes: [], conns: [], regions: [], texts: [] };
         renderCanvas();
         return;
       }
 
-      state.multiSelect = { nodes: selNodes, conns: selConns, regions: selRegions };
+      state.multiSelect = { nodes: selNodes, conns: selConns, regions: selRegions, texts: selTexts };
       state.selectedNode = null;
       state.selectedConn = null;
       state.selectedRegion = null;
+      state.selectedText = null;
       state._dragSelectJustEnded = true;
       renderCanvas();
-      setStatus(`已框選 ${selNodes.length} 個節點、${selConns.length} 條連線、${selRegions.length} 個情境 — 按 Del 全部刪除`);
+      setStatus(`已框選 ${selNodes.length} 個節點、${selConns.length} 條連線、${selRegions.length} 個情境、${selTexts.length} 個文字 — 按 Del 全部刪除`);
     };
 
     document.addEventListener('mousemove', onMove);
@@ -1812,7 +1934,7 @@ document.getElementById('canvas-wrap').addEventListener('click', e => {
   state.selectedNode = null;
   state.selectedConn = null;
   state.selectedRegion = null;
-  state.multiSelect = { nodes: [], conns: [], regions: [] };
+  state.multiSelect = { nodes: [], conns: [], regions: [], texts: [] };
   renderConnections();
   renderRegions();
 });
@@ -1825,15 +1947,17 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' || e.key === 'q' || e.key === 'Q') setMode('select');
   if (e.key === 'w' || e.key === 'W') setMode('connect');
   if (e.key === 'g' || e.key === 'G') setMode('region');
+  if (e.key === 't' || e.key === 'T') setMode('text');
   if (e.key === 'Delete' || e.key === 'Backspace') {
     const dragon = getDragon();
     if (!dragon) return;
     const ms = state.multiSelect;
-    if (ms.nodes.length || ms.conns.length || ms.regions.length) {
+    if (ms.nodes.length || ms.conns.length || ms.regions.length || (ms.texts && ms.texts.length)) {
       dragon.nodes       = dragon.nodes.filter(n => !ms.nodes.includes(n.id));
       dragon.connections = dragon.connections.filter(c => !ms.conns.includes(c.id) && !ms.nodes.includes(c.from) && !ms.nodes.includes(c.to));
       dragon.regions     = (dragon.regions||[]).filter(r => !ms.regions.includes(r.id));
-      state.multiSelect  = { nodes: [], conns: [], regions: [] };
+      dragon.texts       = (dragon.texts||[]).filter(t => !(ms.texts||[]).includes(t.id));
+      state.multiSelect  = { nodes: [], conns: [], regions: [], texts: [] };
       renderCanvas();
       return;
     }
@@ -1850,6 +1974,10 @@ document.addEventListener('keydown', e => {
       dragon.regions = (dragon.regions || []).filter(r => r.id !== state.selectedRegion);
       state.selectedRegion = null;
       renderCanvas();
+    } else if (state.selectedText) {
+      dragon.texts = (dragon.texts || []).filter(t => t.id !== state.selectedText);
+      state.selectedText = null;
+      renderTexts();
     }
   }
 });
@@ -1870,7 +1998,7 @@ async function loadFromDataJson() {
     if (!res.ok) return false;
     const data = await res.json();
     if (!data.dragons || !data.dragons.length) return false;
-    data.dragons.forEach(d => { if (!d.regions) d.regions = []; });
+    data.dragons.forEach(d => { if (!d.regions) d.regions = []; if (!d.texts) d.texts = []; });
     state.dragons = data.dragons;
     state.activeDragon = data.activeDragon;
     state.nextId = data.nextId || 1;
@@ -1898,7 +2026,7 @@ function loadFromHash() {
     const json = decodeURIComponent(atob(padded));
     const data = JSON.parse(json);
     if (!data.dragons || !data.dragons.length) return false;
-    data.dragons.forEach(d => { if (!d.regions) d.regions = []; });
+    data.dragons.forEach(d => { if (!d.regions) d.regions = []; if (!d.texts) d.texts = []; });
     state.dragons = data.dragons;
     state.activeDragon = data.activeDragon;
     state.nextId = data.nextId || 1;
@@ -1917,7 +2045,7 @@ function loadFromStorage() {
     if (!raw) return false;
     const data = JSON.parse(raw);
     if (!data.dragons || !data.dragons.length) return false;
-    data.dragons.forEach(d => { if (!d.regions) d.regions = []; });
+    data.dragons.forEach(d => { if (!d.regions) d.regions = []; if (!d.texts) d.texts = []; });
     state.dragons = data.dragons;
     state.activeDragon = data.activeDragon;
     state.nextId = data.nextId || 1;
@@ -1935,7 +2063,7 @@ renderCanvas = function() { _origRenderCanvas(); scheduleSave(); };
   const fromHash    = !fromJson && loadFromHash();
   const fromStorage = !fromJson && !fromHash && loadFromStorage();
   if (!fromJson && !fromHash && !fromStorage) {
-    state.dragons.push({ id: uid(), name: 'Small Dragon', nodes: [], connections: [], regions: [] });
+    state.dragons.push({ id: uid(), name: 'Small Dragon', nodes: [], connections: [], regions: [], texts: [] });
     state.activeDragon = state.dragons[0].id;
   }
   renderSidebar();
