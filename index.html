@@ -910,11 +910,18 @@ function renderCanvas() {
     div.addEventListener('mousedown', e => onNodeMousedown(e, node.id));
     div.addEventListener('dblclick', e => { e.stopPropagation(); openNodeEdit(node.id); });
     canvas.appendChild(div);
+  });
 
-    requestAnimationFrame(() => {
-      node.w = div.offsetWidth;
-      node.h = div.offsetHeight;
+  // Measure all node sizes, then re-render connections with correct dimensions
+  requestAnimationFrame(() => {
+    dragon.nodes.forEach(node => {
+      const el = document.getElementById('node-' + node.id);
+      if (el) {
+        node.w = el.offsetWidth;
+        node.h = el.offsetHeight;
+      }
     });
+    renderConnections();
   });
 }
 
