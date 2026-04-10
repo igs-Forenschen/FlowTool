@@ -472,15 +472,53 @@ function connSides(fn, tn, fromSideOverride = null, toSideOverride = null) {
   return { exitSide, entrySide };
 }
 
+// ─── 正交路徑工具與智慧評分 (100% 直角保證) ───
+function segmentIntersectsBoxes(p1, p2, boxes) {
+  const x1 = Math.min(p1.x, p2.x), x2 = Math.max(p1.x, p2.x);
+  const y1 = Math.min(p1.y, p2.y), y2 = Math.max(p1.y, p2.y);
+  
+  for (const box of boxes) {
+    const eps = 0.5; // 容錯，防止與 PAD 重疊時誤判
+    if (Math.abs(p1.y - p2.y) < 0.1) { // 水平線
+      if (p1.y > box.top + eps && p1.y < box.bottom - eps && x2 > box.left + eps && x1 < box.right - eps) return true;
+    } else if (Math.abs(p1.x - p2.x) < 0.1) { // 垂直線
+      if (p1.x > box.left + eps && p1.x < box.right - eps && y2 > box.top + eps && y1 < box.bottom - eps) return true;
+    }
+  }
+  return false;
+}
+
+function pathScore(pts, boxes) {
+  let intersects = 0, length = 0;
+  let bends = pts.length - 2;
+  for (let i = 0; i < pts.length - 1; i++) {
+    if (segmentIntersectsBoxes(pts[i], pts[i+1], boxes)) intersects++;
+    length += Math.abs(pts[i+1].x - pts[i].x) + Math.abs(pts[i+1].y - pts[i].y);
+  }
+  return intersects * 500000 + bends * 2000 + length;
+}
+
+// 嚴格過濾共線點與重複點，維持正交性
+function cleanOrthogonalPath(pts) {
+  if (!pts || pts.length <= 1) return pts;
+  let res = [pts[0]];
+  for (let i = 1; i < pts.length - 1; i++) {
+    let A = res[res.length - 1], B = pts[i], C = pts[i + 1];
+    if (Math.hypot(A.x - B.x, A.y - B.y) < 0.5) continue;
+    // 檢查 A-B-C 是否為同一軸線
+    let isSameLine = (Math.abs(A.x - B.x) < 0.1 && Math.abs(B.x - C.x) < 0.1) || 
+                     (Math.abs(A.y - B.y) < 0.1 && Math.abs(B.y - C.y) < 0.1);
+    if (!isSameLine) res.push(B);
+  }
+  let last = pts[pts.length - 1];
+  if (Math.hypot(res[res.length-1].x - last.x, res[res.length-1].y - last.y) > 0.5) {
+      res.push(last);
+  }
+  return res;
+}
+
 function orthoRoute(fn, tn, fromFrac = 0.5, toFrac = 0.5, fromSideOverride = null, toSideOverride = null, midOffset = null) {
-  const fw = fn.w||160, fh = fn.h||70;
-  const tw = tn.w||160, th = tn.h||70;
-  const fL = fn.x, fR = fn.x+fw, fT = fn.y, fB = fn.y+fh;
-  const tL = tn.x, tR = tn.x+tw, tT = tn.y, tB = tn.y+th;
-  const GAP = 24;
-
   const { exitSide, entrySide } = connSides(fn, tn, fromSideOverride, toSideOverride);
-
   const edgePt = (node, side, frac) => {
     const nw = node.w||160, nh = node.h||70;
     if (side==='right')  return { x: node.x+nw, y: node.y + nh * frac };
@@ -488,45 +526,65 @@ function orthoRoute(fn, tn, fromFrac = 0.5, toFrac = 0.5, fromSideOverride = nul
     if (side==='bottom') return { x: node.x + nw * frac, y: node.y+nh };
     return                       { x: node.x + nw * frac, y: node.y };
   };
+  const fp = edgePt(fn, exitSide, fromFrac), tp = edgePt(tn, entrySide, toFrac);
+  
+  const GAP = 24; 
+  const getDir = (side) => {
+      if (side === 'right') return {x: 1, y: 0};
+      if (side === 'left') return {x: -1, y: 0};
+      if (side === 'bottom') return {x: 0, y: 1};
+      return {x: 0, y: -1}; 
+  };
+  const dF = getDir(exitSide), dT = getDir(entrySide);
+  const p1 = { x: fp.x + dF.x * GAP, y: fp.y + dF.y * GAP };
+  const p2 = { x: tp.x + dT.x * GAP, y: tp.y + dT.y * GAP };
 
-  const fp = edgePt(fn, exitSide, fromFrac);
-  const tp = edgePt(tn, entrySide, toFrac);
-  let pts = [fp];
+  // 障礙物定義
+  const PAD = 20;
+  const dragon = getDragon();
+  let boxes = dragon ? dragon.nodes.map(n => ({
+      left: n.x - PAD, right: n.x + (n.w || 160) + PAD,
+      top: n.y - PAD, bottom: n.y + (n.h || 70) + PAD
+  })) : [];
 
-  if (exitSide === 'right' && entrySide === 'left') {
-    const mx = midOffset ?? (fp.x + tp.x) / 2;
-    pts.push({ x: mx, y: fp.y }, { x: mx, y: tp.y });
-  } else if (exitSide === 'left' && entrySide === 'right') {
-    const mx = midOffset ?? (fp.x + tp.x) / 2;
-    pts.push({ x: mx, y: fp.y }, { x: mx, y: tp.y });
-  } else if (exitSide === 'bottom' && entrySide === 'top') {
-    const my = midOffset ?? (fp.y + tp.y) / 2;
-    pts.push({ x: fp.x, y: my }, { x: tp.x, y: my });
-  } else if (exitSide === 'top' && entrySide === 'bottom') {
-    const my = midOffset ?? (fp.y + tp.y) / 2;
-    pts.push({ x: fp.x, y: my }, { x: tp.x, y: my });
-  } else if (exitSide === 'right' && entrySide === 'right') {
-    const mx = midOffset ?? (Math.max(fR, tR) + GAP);
-    pts.push({ x: mx, y: fp.y }, { x: mx, y: tp.y });
-  } else if (exitSide === 'left' && entrySide === 'left') {
-    const mx = midOffset ?? (Math.min(fL, tL) - GAP);
-    pts.push({ x: mx, y: fp.y }, { x: mx, y: tp.y });
-  } else if (exitSide === 'bottom' && entrySide === 'bottom') {
-    const my = midOffset ?? (Math.max(fB, tB) + GAP);
-    pts.push({ x: fp.x, y: my }, { x: tp.x, y: my });
-  } else if (exitSide === 'top' && entrySide === 'top') {
-    const my = midOffset ?? (Math.min(fT, tT) - GAP);
-    pts.push({ x: fp.x, y: my }, { x: tp.x, y: my });
-  } else {
-    if (exitSide==='right'||exitSide==='left') {
-      pts.push({ x: tp.x, y: fp.y });
-    } else {
-      pts.push({ x: fp.x, y: tp.y });
-    }
+  // 候選點生成軸
+  const ULeft = Math.min(fn.x, tn.x) - PAD - 24, URight = Math.max(fn.x+(fn.w||160), tn.x+(tn.w||160)) + PAD + 24;
+  const UTop = Math.min(fn.y, tn.y) - PAD - 24, UBottom = Math.max(fn.y+(fn.h||70), tn.y+(tn.h||70)) + PAD + 24;
+  let Xs = [...new Set([p1.x, p2.x, (p1.x+p2.x)/2, ULeft, URight])], Ys = [...new Set([p1.y, p2.y, (p1.y+p2.y)/2, UTop, UBottom])];
+  if (midOffset !== null) { if (dF.x !== 0) Xs.push(midOffset); else Ys.push(midOffset); }
+
+  let candidates = [];
+  // 1. 直連 (僅限座標對齊)
+  if (p1.x === p2.x || p1.y === p2.y) candidates.push([p1, p2]);
+  // 2. L型 (只有兩種可能且必為直角)
+  candidates.push([p1, {x: p2.x, y: p1.y}, p2]);
+  candidates.push([p1, {x: p1.x, y: p2.y}, p2]);
+  // 3. Z型 (水平中斷或垂直中斷，維持直角)
+  for (let mx of Xs) candidates.push([p1, {x: mx, y: p1.y}, {x: mx, y: p2.y}, p2]);
+  for (let my of Ys) candidates.push([p1, {x: p1.x, y: my}, {x: p2.x, y: my}, p2]);
+  // 4. U型 (大迴避)
+  for (let mx of Xs) { for (let my of Ys) {
+      candidates.push([p1, {x: mx, y: p1.y}, {x: mx, y: my}, {x: p2.x, y: my}, p2]);
+      candidates.push([p1, {x: p1.x, y: my}, {x: mx, y: my}, {x: mx, y: p2.y}, p2]);
+  }}
+
+  let bestPath = null, bestScore = Infinity;
+  for (let rawPath of candidates) {
+      // 驗證路徑方向性：第一步與最後一步不可反向衝進節點
+      let A = rawPath[0], B = rawPath[1], Z = rawPath[rawPath.length-1], Y = rawPath[rawPath.length-2];
+      if (Math.sign(B.x - A.x) === -dF.x && dF.x !== 0) continue;
+      if (Math.sign(B.y - A.y) === -dF.y && dF.y !== 0) continue;
+      if (Math.sign(Z.x - Y.x) === dT.x && dT.x !== 0) continue;
+      if (Math.sign(Z.y - Y.y) === dT.y && dT.y !== 0) continue;
+
+      let score = pathScore(rawPath, boxes);
+      if (score < bestScore) { bestScore = score; bestPath = rawPath; }
   }
 
-  pts.push(tp);
-  return { pts, exitSide, entrySide };
+  // 若計算失敗（極端狀況），回歸預設 L 型
+  if (!bestPath) bestPath = [p1, {x: p2.x, y: p1.y}, p2];
+  
+  return { pts: cleanOrthogonalPath([fp, ...bestPath, tp]), exitSide, entrySide, fp, tp };
 }
 
 function ptsToRoundedDPath(pts, radius = 12) {
@@ -534,18 +592,11 @@ function ptsToRoundedDPath(pts, radius = 12) {
   let d = `M ${pts[0].x} ${pts[0].y}`;
   for (let i = 1; i < pts.length - 1; i++) {
     const prev = pts[i - 1], curr = pts[i], next = pts[i + 1];
-    const d1 = Math.hypot(curr.x - prev.x, curr.y - prev.y);
-    const d2 = Math.hypot(next.x - curr.x, next.y - curr.y);
-    // Skip rounding if either segment is too short — avoids NaN from division by ~0
-    if (d1 < 1 || d2 < 1) {
-      d += ` L ${curr.x} ${curr.y}`;
-      continue;
-    }
+    const d1 = Math.hypot(curr.x - prev.x, curr.y - prev.y), d2 = Math.hypot(next.x - curr.x, next.y - curr.y);
+    if (d1 < 1 || d2 < 1) { d += ` L ${curr.x} ${curr.y}`; continue; }
     const r = Math.min(radius, d1 / 2.1, d2 / 2.1);
-    const v1 = { x: (curr.x - prev.x) / d1, y: (curr.y - prev.y) / d1 };
-    const v2 = { x: (next.x - curr.x) / d2, y: (next.y - curr.y) / d2 };
-    const p1 = { x: curr.x - v1.x * r, y: curr.y - v1.y * r };
-    const p2 = { x: curr.x + v2.x * r, y: curr.y + v2.y * r };
+    const v1 = { x: (curr.x - prev.x) / d1, y: (curr.y - prev.y) / d1 }, v2 = { x: (next.x - curr.x) / d2, y: (next.y - curr.y) / d2 };
+    const p1 = { x: curr.x - v1.x * r, y: curr.y - v1.y * r }, p2 = { x: curr.x + v2.x * r, y: curr.y + v2.y * r };
     d += ` L ${p1.x} ${p1.y} Q ${curr.x} ${curr.y} ${p2.x} ${p2.y}`;
   }
   d += ` L ${pts[pts.length - 1].x} ${pts[pts.length - 1].y}`;
@@ -560,8 +611,7 @@ function drawConnection(svg, conn, fromNode, toNode, fromFrac = 0.5, toFrac = 0.
 
   const autoResult = orthoRoute(fromNode, toNode, fromFrac, toFrac, conn.fromSide || null, conn.toSide || null, conn.midOffset ?? null);
   const { exitSide, entrySide } = autoResult;
-  const fp = autoResult.pts[0], tp = autoResult.pts[autoResult.pts.length - 1];
-  const pts = conn.userPts ? [fp, ...conn.userPts, tp] : autoResult.pts;
+  let pts = conn.userPts ? [autoResult.fp, ...conn.userPts, autoResult.tp] : autoResult.pts;
   const d = ptsToRoundedDPath(pts, 14);
 
   const handleConnInteraction = (e, isSeg, isHoriz, segIdx, simplePts) => {
@@ -570,43 +620,29 @@ function drawConnection(svg, conn, fromNode, toNode, fromFrac = 0.5, toFrac = 0.
     const isDblClick = (now - (state.lastClickTime || 0) < 300) && (state.lastClickTarget === conn.id);
     state.lastClickTime = now;
     state.lastClickTarget = conn.id;
-
     if (isDblClick) { openConnEdit(conn.id); return; }
-
     if (state.selectedConn !== conn.id) {
-      state.selectedConn = conn.id;
-      state.selectedNode = null;
-      state.selectedRegion = null;
+      state.selectedConn = conn.id; state.selectedNode = null; state.selectedRegion = null;
       renderConnections();
       setStatus('已選取連線 — 按 Del 刪除，拖曳線段可調整，拖曳端點圓圈重新連接');
     }
-
     if (isSeg) startSegmentDrag(e, conn, isHoriz, segIdx, simplePts);
   };
 
   const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  hit.setAttribute('d', d);
-  hit.setAttribute('stroke', 'transparent');
-  hit.setAttribute('stroke-width', '18');
-  hit.setAttribute('fill', 'none');
-  hit.style.pointerEvents = 'stroke';
-  hit.style.cursor = 'pointer';
-  hit.style.display = 'block';
+  hit.setAttribute('d', d); hit.setAttribute('stroke', 'transparent'); hit.setAttribute('stroke-width', '18'); hit.setAttribute('fill', 'none');
+  hit.style.pointerEvents = 'stroke'; hit.style.cursor = 'pointer';
   hit.addEventListener('mousedown', (e) => handleConnInteraction(e, false));
   svg.appendChild(hit);
 
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', d);
-  path.setAttribute('stroke', lineColor);
-  path.setAttribute('stroke-width', isSelected ? '4' : '2.5');
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke-linejoin', 'round');
-  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('d', d); path.setAttribute('stroke', lineColor); path.setAttribute('stroke-width', isSelected ? '4' : '2.5');
+  path.setAttribute('fill', 'none'); path.setAttribute('stroke-linejoin', 'round'); path.setAttribute('stroke-linecap', 'round');
   if (isSelected) path.setAttribute('filter', 'drop-shadow(0px 0px 6px rgba(255,255,255,0.6))');
-  path.style.pointerEvents = 'none';
   svg.appendChild(path);
 
   const svgTop = document.getElementById('svg-top');
+  const fp = pts[0], tp = pts[pts.length - 1]; 
   if (svgTop) {
     const shapeId = conn.shape || 'diamond';
     if (shapeId !== 'none') {
@@ -624,102 +660,65 @@ function drawConnection(svg, conn, fromNode, toNode, fromFrac = 0.5, toFrac = 0.
     }
   }
 
-  // ─── 繪製置底箭頭 ───
   const ptsLen = pts.length;
   if (ptsLen > 1) {
     if (conn.dir === 'forward' || conn.dir === 'both') {
-      const prev = pts[ptsLen - 2], curr = pts[ptsLen - 1];
-      const angle = Math.atan2(curr.y - prev.y, curr.x - prev.x);
-      drawEndpointArrow(svg, curr.x, curr.y, angle, arrowColor, isSelected);
+      const pB = pts[ptsLen - 2], pA = pts[ptsLen - 1];
+      drawEndpointArrow(svg, pA.x, pA.y, Math.atan2(pA.y - pB.y, pA.x - pB.x), arrowColor, isSelected);
     }
     if (conn.dir === 'backward' || conn.dir === 'both') {
-      const curr = pts[0], next = pts[1];
-      const angle = Math.atan2(curr.y - next.y, curr.x - next.x);
-      drawEndpointArrow(svg, curr.x, curr.y, angle, arrowColor, isSelected);
+      const pA = pts[0], pB = pts[1];
+      drawEndpointArrow(svg, pA.x, pA.y, Math.atan2(pA.y - pB.y, pA.x - pB.x), arrowColor, isSelected);
     }
   }
 
-  // Label
-  let longestSeg = null, longestLen = 0;
-  for (let i = 1; i < pts.length; i++) {
-    const len = Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y);
-    if (len > longestLen) { longestLen = len; longestSeg = { a: pts[i-1], b: pts[i] }; }
-  }
-  if (conn.label && longestSeg) {
-    const lx = (longestSeg.a.x + longestSeg.b.x) / 2;
-    const ly = (longestSeg.a.y + longestSeg.b.y) / 2 - 14; 
-    const bgW = conn.label.length * 6.5 + 14;
-    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bg.setAttribute('x', lx - bgW/2); bg.setAttribute('y', ly - 13);
-    bg.setAttribute('width', bgW);    bg.setAttribute('height', 18);
-    bg.setAttribute('fill', '#1a1a26'); bg.setAttribute('rx', 6);
-    bg.setAttribute('stroke', '#333'); bg.setAttribute('stroke-width', '1');
-    bg.style.pointerEvents = 'auto'; bg.style.cursor = 'pointer';
-    bg.addEventListener('mousedown', (e) => handleConnInteraction(e, false));
-    svg.appendChild(bg);
-    const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    textEl.setAttribute('x', lx); textEl.setAttribute('y', ly + 1);
-    textEl.setAttribute('text-anchor', 'middle'); textEl.setAttribute('font-size', '11');
-    textEl.setAttribute('fill', '#e2e0d8');
-    textEl.setAttribute('font-family', 'Segoe UI, sans-serif');
-    textEl.style.pointerEvents = 'auto'; textEl.style.cursor = 'pointer';
-    textEl.addEventListener('mousedown', (e) => handleConnInteraction(e, false));
-    textEl.textContent = conn.label;
-    svg.appendChild(textEl);
+  if (conn.label) {
+    let longestSeg = null, maxLen = 0;
+    for (let i = 1; i < pts.length; i++) {
+        const l = Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y);
+        if (l > maxLen) { maxLen = l; longestSeg = {a: pts[i-1], b: pts[i]}; }
+    }
+    if (longestSeg) {
+        const lx = (longestSeg.a.x+longestSeg.b.x)/2, ly = (longestSeg.a.y+longestSeg.b.y)/2 - 14;
+        const bgW = conn.label.length * 7 + 14;
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        bg.setAttribute('x', lx-bgW/2); bg.setAttribute('y', ly-13); bg.setAttribute('width', bgW); bg.setAttribute('height', 18);
+        bg.setAttribute('fill', '#1a1a26'); bg.setAttribute('rx', 6); bg.setAttribute('stroke', '#333');
+        bg.style.cursor = 'pointer'; bg.addEventListener('mousedown', (e) => handleConnInteraction(e, false));
+        svg.appendChild(bg);
+        const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        t.setAttribute('x', lx); t.setAttribute('y', ly+1); t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '11');
+        t.setAttribute('fill', '#e2e0d8'); t.textContent = conn.label;
+        t.style.cursor = 'pointer'; t.addEventListener('mousedown', (e) => handleConnInteraction(e, false));
+        svg.appendChild(t);
+    }
   }
 
   if (!state.preview) {
-    const simplePts = [pts[0]];
-    for (let k = 1; k < pts.length - 1; k++) {
-      const prev = simplePts[simplePts.length - 1];
-      const curr = pts[k], next = pts[k + 1];
-      const colH = Math.abs(curr.y - prev.y) < 1 && Math.abs(next.y - curr.y) < 1;
-      const colV = Math.abs(curr.x - prev.x) < 1 && Math.abs(next.x - curr.x) < 1;
-      if (!colH && !colV) simplePts.push(curr);
-    }
-    simplePts.push(pts[pts.length - 1]);
-
+    const simplePts = cleanOrthogonalPath(pts);
     for (let i = 1; i < simplePts.length; i++) {
       const a = simplePts[i-1], b = simplePts[i];
-      const isHoriz = Math.abs(b.y - a.y) < 2;
-      const isVert  = Math.abs(b.x - a.x) < 2;
-      const segLen  = Math.hypot(b.x-a.x, b.y-a.y);
-      if (segLen < 16) continue;
-      if (!isHoriz && !isVert) continue;
-      const cursor = isHoriz ? 'ns-resize' : 'ew-resize';
-      const segHit = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      segHit.setAttribute('x1', a.x); segHit.setAttribute('y1', a.y);
-      segHit.setAttribute('x2', b.x); segHit.setAttribute('y2', b.y);
-      segHit.setAttribute('stroke', 'transparent');
-      segHit.setAttribute('stroke-width', '16');
-      segHit.style.pointerEvents = 'stroke';
-      segHit.style.cursor = cursor;
-      const capturedI = i, capturedIsHoriz = isHoriz;
-      segHit.addEventListener('mousedown', e => { handleConnInteraction(e, true, capturedIsHoriz, capturedI, simplePts); });
-      svg.appendChild(segHit);
+      const isH = Math.abs(b.y-a.y) < 2, isV = Math.abs(b.x-a.x) < 2;
+      if ((!isH && !isV) || Math.hypot(b.x-a.x, b.y-a.y) < 16) continue;
+      const h = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      h.setAttribute('x1', a.x); h.setAttribute('y1', a.y); h.setAttribute('x2', b.x); h.setAttribute('y2', b.y);
+      h.setAttribute('stroke', 'transparent'); h.setAttribute('stroke-width', '16'); h.style.pointerEvents = 'stroke';
+      h.style.cursor = isH ? 'ns-resize' : 'ew-resize';
+      h.addEventListener('mousedown', e => handleConnInteraction(e, true, isH, i, simplePts));
+      svg.appendChild(h);
     }
   }
 
-  // ─── 選取時顯示端點拖拉圓圈 (FigJam 風格) ───
   if (isSelected && svgTop) {
-    const addHandle = (hx, hy, which) => {
+    const h = (x, y, w) => {
       const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      c.setAttribute('cx', hx);
-      c.setAttribute('cy', hy);
-      c.setAttribute('r', '5.5');
-      c.setAttribute('fill', '#ffffff');
-      c.setAttribute('stroke', lineColor);
-      c.setAttribute('stroke-width', '2.5');
-      c.style.pointerEvents = 'auto';
-      c.style.cursor = 'crosshair';
-      c.addEventListener('mousedown', e => {
-        e.stopPropagation();
-        startEndpointDrag(e, conn, which);
-      });
+      c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', '5.5');
+      c.setAttribute('fill', '#fff'); c.setAttribute('stroke', lineColor); c.setAttribute('stroke-width', '2.5');
+      c.style.pointerEvents = 'auto'; c.style.cursor = 'crosshair';
+      c.addEventListener('mousedown', e => { e.stopPropagation(); startEndpointDrag(e, conn, w); });
       svgTop.appendChild(c);
     };
-    addHandle(fp.x, fp.y, 'from');
-    addHandle(tp.x, tp.y, 'to');
+    h(fp.x, fp.y, 'from'); h(tp.x, tp.y, 'to');
   }
 }
 
@@ -737,54 +736,34 @@ function renderSidebar() {
 
 function nearestSide(node, mx, my) {
   const nw = node.w||160, nh = node.h||70;
-  const dRight  = Math.abs(mx - (node.x + nw));
-  const dLeft   = Math.abs(mx - node.x);
-  const dBottom = Math.abs(my - (node.y + nh));
-  const dTop    = Math.abs(my - node.y);
-  const min = Math.min(dRight, dLeft, dBottom, dTop);
-  if (min === dRight)  return 'right';
-  if (min === dLeft)   return 'left';
-  if (min === dBottom) return 'bottom';
-  return 'top';
+  const dR = Math.abs(mx-(node.x+nw)), dL = Math.abs(mx-node.x), dB = Math.abs(my-(node.y+nh)), dT = Math.abs(my-node.y);
+  const min = Math.min(dR, dL, dB, dT);
+  if (min === dR) return 'right'; if (min === dL) return 'left'; if (min === dB) return 'bottom'; return 'top';
 }
 
 function drawPortIndicators(node, activeSide) {
-  const svgTop = document.getElementById('svg-top');
-  if (!svgTop) return;
+  const svgTop = document.getElementById('svg-top'); if (!svgTop) return;
   const nw = node.w||160, nh = node.h||70;
-  const sides = {
-    right:  { x: node.x+nw,    y: node.y+nh/2 },
-    left:   { x: node.x,       y: node.y+nh/2 },
-    bottom: { x: node.x+nw/2,  y: node.y+nh   },
-    top:    { x: node.x+nw/2,  y: node.y       },
-  };
+  const sides = { right: {x:node.x+nw,y:node.y+nh/2}, left: {x:node.x,y:node.y+nh/2}, bottom: {x:node.x+nw/2,y:node.y+nh}, top: {x:node.x+nw/2,y:node.y} };
   Object.entries(sides).forEach(([side, pt]) => {
     const isActive = side === activeSide;
     const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y);
-    c.setAttribute('r', isActive ? 8 : 5);
-    c.setAttribute('fill', isActive ? '#7eb8f0' : '#2a2a3a');
-    c.setAttribute('stroke', isActive ? '#ffffff' : '#555');
-    c.setAttribute('stroke-width', '1.5');
-    c.style.pointerEvents = 'none';
-    svgTop.appendChild(c);
+    c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y); c.setAttribute('r', isActive?8:5);
+    c.setAttribute('fill', isActive?'#7eb8f0':'#2a2a3a'); c.setAttribute('stroke', isActive?'#fff':'#555');
+    c.setAttribute('stroke-width', '1.5'); svgTop.appendChild(c);
   });
 }
 
 function startSegmentDrag(e, conn, isHoriz, segIdx, simplePts) {
   e.stopPropagation();
-  const wrap = document.getElementById('canvas-wrap');
-  const rect = wrap.getBoundingClientRect();
-  const fp = { x: simplePts[0].x, y: simplePts[0].y };
-  const tp = { x: simplePts[simplePts.length-1].x, y: simplePts[simplePts.length-1].y };
-  const initUserPts = simplePts.slice(1, -1).map(p => ({ x: p.x, y: p.y }));
-  const idxA = segIdx - 2;
-  const idxB = segIdx - 1;
+  const wrap = document.getElementById('canvas-wrap'), rect = wrap.getBoundingClientRect();
+  const fp = simplePts[0], tp = simplePts[simplePts.length-1];
+  const initUserPts = simplePts.slice(1, -1).map(p => ({...p}));
+  const idxA = segIdx - 2, idxB = segIdx - 1;
 
   const onMove = ev => {
-    const cx = ev.clientX - rect.left;
-    const cy = ev.clientY - rect.top;
-    let newPts = initUserPts.map(p => ({ ...p }));
+    const cx = ev.clientX - rect.left, cy = ev.clientY - rect.top;
+    let newPts = initUserPts.map(p => ({...p}));
     if (isHoriz) {
       if (idxA >= 0 && idxA < newPts.length) newPts[idxA].y = cy;
       if (idxB >= 0 && idxB < newPts.length) newPts[idxB].y = cy;
@@ -796,1282 +775,340 @@ function startSegmentDrag(e, conn, isHoriz, segIdx, simplePts) {
       if (idxA < 0) newPts.unshift({ x: cx, y: fp.y });
       if (idxB >= initUserPts.length) newPts.push({ x: cx, y: tp.y });
     }
-    conn.userPts = newPts;
-    renderConnections();
+    conn.userPts = newPts; renderConnections();
   };
-
   const onUp = () => {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    // Clean up degenerate/collinear points from userPts
+    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
     if (conn.userPts) conn.userPts = cleanUserPts(conn.userPts, fp, tp);
     renderCanvas();
   };
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
+  document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
 }
 
-// Remove redundant collinear or near-duplicate points from userPts.
-// If nothing meaningful remains, returns null so auto-routing takes over.
 function cleanUserPts(userPts, fp, tp) {
   if (!userPts || userPts.length === 0) return null;
-
   const full = [fp, ...userPts, tp];
-  const THRESH = 4; // px tolerance for collinearity / duplicate
-
-  // Remove duplicate consecutive points
   let cleaned = [full[0]];
   for (let i = 1; i < full.length; i++) {
-    const prev = cleaned[cleaned.length - 1];
-    if (Math.hypot(full[i].x - prev.x, full[i].y - prev.y) > THRESH) {
-      cleaned.push(full[i]);
-    }
+    if (Math.hypot(full[i].x - cleaned[cleaned.length-1].x, full[i].y - cleaned[cleaned.length-1].y) > 4) cleaned.push(full[i]);
   }
-
-  // Remove collinear middle points
   let simplified = [cleaned[0]];
   for (let i = 1; i < cleaned.length - 1; i++) {
-    const a = simplified[simplified.length - 1];
-    const b = cleaned[i];
-    const c = cleaned[i + 1];
-    const isCollinearH = Math.abs(a.y - b.y) < THRESH && Math.abs(b.y - c.y) < THRESH;
-    const isCollinearV = Math.abs(a.x - b.x) < THRESH && Math.abs(b.x - c.x) < THRESH;
-    if (!isCollinearH && !isCollinearV) simplified.push(b);
+    const a = simplified[simplified.length-1], b = cleaned[i], c = cleaned[i+1];
+    if (!( (Math.abs(a.y-b.y)<4 && Math.abs(b.y-c.y)<4) || (Math.abs(a.x-b.x)<4 && Math.abs(b.x-c.x)<4) )) simplified.push(b);
   }
-  simplified.push(cleaned[cleaned.length - 1]);
-
-  // Strip fp and tp back out
+  simplified.push(cleaned[cleaned.length-1]);
   const inner = simplified.slice(1, -1);
   return inner.length > 0 ? inner : null;
 }
 
-// ─── 端點跨節點拖曳判定 ───
 function startEndpointDrag(e, conn, which) {
   e.stopPropagation();
-  const wrap = document.getElementById('canvas-wrap');
-  const rect = wrap.getBoundingClientRect();
+  const wrap = document.getElementById('canvas-wrap'), rect = wrap.getBoundingClientRect();
   const dragon = getDragon();
-
   const onMove = ev => {
-    const mx = ev.clientX - rect.left;
-    const my = ev.clientY - rect.top;
-
-    let targetNode = null;
-    let minDist = Infinity;
-
-    // 尋找游標附近的節點 (加長判定範圍)
+    const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    let targetNode = null, minDist = Infinity;
     dragon.nodes.forEach(n => {
-      const nw = n.w || 160, nh = n.h || 70;
-      const pad = 40; 
-      if (mx >= n.x - pad && mx <= n.x + nw + pad &&
-          my >= n.y - pad && my <= n.y + nh + pad) {
-         const cx = n.x + nw/2;
-         const cy = n.y + nh/2;
-         const dist = Math.hypot(mx - cx, my - cy);
-         if (dist < minDist) {
-           minDist = dist;
-           targetNode = n;
-         }
+      const pad = 40, dist = Math.hypot(mx-(n.x+(n.w||160)/2), my-(n.y+(n.h||70)/2));
+      if (mx >= n.x-pad && mx <= n.x+(n.w||160)+pad && my >= n.y-pad && my <= n.y+(n.h||70)+pad && dist < minDist) {
+        minDist = dist; targetNode = n;
       }
     });
-
     if (targetNode) {
       const side = nearestSide(targetNode, mx, my);
-      if (which === 'from') {
-        conn.from = targetNode.id;
-        conn.fromSide = side;
-      } else {
-        conn.to = targetNode.id;
-        conn.toSide = side;
-      }
-      conn.userPts = null;
-      conn.midOffset = null;
-      renderConnections();
-      drawPortIndicators(targetNode, side); // renderConnections 後顯示點
-    } else {
-       // 如果拖到空地，保持在原本的節點上預覽
-       const fallbackNodeId = which === 'from' ? conn.from : conn.to;
-       const cNode = dragon.nodes.find(n => n.id === fallbackNodeId);
-       if (cNode) {
-         const side = nearestSide(cNode, mx, my);
-         if (which === 'from') conn.fromSide = side;
-         else conn.toSide = side;
-         conn.userPts = null;
-         conn.midOffset = null;
-         renderConnections();
-         drawPortIndicators(cNode, side);
-       }
+      if (which === 'from') { conn.from = targetNode.id; conn.fromSide = side; } else { conn.to = targetNode.id; conn.toSide = side; }
+      conn.userPts = null; conn.midOffset = null; renderConnections(); drawPortIndicators(targetNode, side);
     }
   };
-
-  const onUp = ev => {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    renderCanvas();
-    const finalSide = which === 'from' ? conn.fromSide : conn.toSide;
-    const sideNames = { right:'右側', left:'左側', top:'上方', bottom:'下方' };
-    setStatus(`已重新連接至「${sideNames[finalSide]}」`);
-  };
-
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
+  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); renderCanvas(); };
+  document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
 }
 
 function renderCanvas() {
-  const dragon = getDragon();
-  const canvas = document.getElementById('canvas');
-  const svg = document.getElementById('svg-conn');
-
+  const dragon = getDragon(), canvas = document.getElementById('canvas'), svg = document.getElementById('svg-conn');
   canvas.innerHTML = '';
-  const defs = svg.querySelector('defs');
-  svg.innerHTML = '';
-  svg.appendChild(defs);
-  const svgTop = document.getElementById('svg-top');
-  if (svgTop) svgTop.innerHTML = '';
-
-  if (!dragon) {
-    canvas.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#666;font-size:15px;background:#1a1a26;padding:16px 24px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:1px solid #333;">← 請先選擇或新增龍角色<br><span style="font-size:12px;margin-top:8px;color:#888;display:block">接著點「貼上動作」即可快速生成節點</span></div>';
-    return;
-  }
-
-  if (dragon.nodes.length === 0 && (!dragon.regions || dragon.regions.length === 0)) {
-    canvas.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#666;font-size:15px;background:#1a1a26;padding:16px 24px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:1px solid #333;">點擊上方的「貼上動作」新增節點</div>';
-  }
-
-  renderRegions();
-  renderTexts();
+  const defs = svg.querySelector('defs'); svg.innerHTML = ''; svg.appendChild(defs);
+  const svgTop = document.getElementById('svg-top'); if (svgTop) svgTop.innerHTML = '';
+  if (!dragon) { canvas.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#666;font-size:15px;background:#1a1a26;padding:16px 24px;border-radius:12px;border:1px solid #333;">← 請先選擇或新增龍角色</div>'; return; }
+  renderRegions(); renderTexts();
   dragon.connections.forEach(conn => {
-    const fromNode = dragon.nodes.find(n => n.id === conn.from);
-    const toNode = dragon.nodes.find(n => n.id === conn.to);
-    if (!fromNode || !toNode) return;
-    const fromFrac = conn.fromFrac ?? 0.5;
-    const toFrac   = conn.toFrac   ?? 0.5;
-    drawConnection(svg, conn, fromNode, toNode, fromFrac, toFrac);
+    const fn = dragon.nodes.find(n => n.id === conn.from), tn = dragon.nodes.find(n => n.id === conn.to);
+    if (fn && tn) drawConnection(svg, conn, fn, tn, conn.fromFrac||0.5, conn.toFrac||0.5);
   });
   dragon.nodes.forEach(node => {
-    const cat = CATS[node.cat] || CATS['其他'];
-    const div = document.createElement('div');
-    const isMultiSel = state.multiSelect.nodes.includes(node.id);
-    div.className = 'node' +
-      (state.selectedNode === node.id ? ' selected' : '') +
-      (isMultiSel ? ' multi-selected' : '') +
-      (state.connectFrom === node.id ? ' connect-src' : '');
-    div.id = 'node-' + node.id;
-    div.style.left = node.x + 'px';
-    div.style.top = node.y + 'px';
-    div.style.background = cat.bg;
-    div.style.borderColor = cat.border;
-
-    div.innerHTML = `
-      <div class="node-body">
-        <div class="node-name" style="color:${cat.text}">${node.name}</div>
-        ${node.notes ? `<div class="node-notes" style="color:${cat.label}">${node.notes}</div>` : ''}
-      </div>`;
-
+    const cat = CATS[node.cat] || CATS['其他'], div = document.createElement('div');
+    div.className = 'node' + (state.selectedNode===node.id?' selected':'') + (state.multiSelect.nodes.includes(node.id)?' multi-selected':'') + (state.connectFrom===node.id?' connect-src':'');
+    div.id = 'node-' + node.id; div.style.left = node.x + 'px'; div.style.top = node.y + 'px';
+    div.style.background = cat.bg; div.style.borderColor = cat.border;
+    div.innerHTML = `<div class="node-body"><div class="node-name" style="color:${cat.text}">${node.name}</div>${node.notes?`<div class="node-notes" style="color:${cat.label}">${node.notes}</div>`:''}</div>`;
     div.addEventListener('mousedown', e => onNodeMousedown(e, node.id));
     div.addEventListener('dblclick', e => { e.stopPropagation(); openNodeEdit(node.id); });
     canvas.appendChild(div);
   });
-
-  // Measure all node sizes, then re-render connections with correct dimensions
   requestAnimationFrame(() => {
-    dragon.nodes.forEach(node => {
-      const el = document.getElementById('node-' + node.id);
-      if (el) {
-        node.w = el.offsetWidth;
-        node.h = el.offsetHeight;
-      }
-    });
+    dragon.nodes.forEach(node => { const el = document.getElementById('node-'+node.id); if (el) { node.w = el.offsetWidth; node.h = el.offsetHeight; } });
     renderConnections();
   });
 }
 
 function renderRegions() {
-  const dragon = getDragon();
-  const rLayer = document.getElementById('regions-layer');
-  if (!rLayer || !dragon) return;
-  rLayer.innerHTML = '';
-  (dragon.regions || []).forEach(region => {
-    const rc = REGION_COLORS.find(c => c.id === region.color) || REGION_COLORS[0];
-    const div = document.createElement('div');
-    const isSel = state.selectedRegion === region.id;
-    
-    div.style.cssText = `position:absolute;left:${region.x}px;top:${region.y}px;width:${region.w}px;height:${region.h}px;
-      background:${rc.bg}; border: 1.5px ${isSel ? 'solid' : 'dashed'} ${rc.border}; border-radius:12px;
-      box-sizing:border-box; cursor:pointer; pointer-events:auto;
-      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
-      box-shadow: ${isSel ? `0 0 0 2px ${rc.border}, 0 4px 12px rgba(0,0,0,0.15)` : '0 4px 12px rgba(0,0,0,0.08)'};
-      transition: box-shadow 0.2s, border 0.2s;`;
-      
-    const tag = document.createElement('div');
-    tag.style.cssText = `position:absolute;top:-1.5px;left:-1.5px;background:${rc.border};color:${rc.text};
-      font-size:12px;font-weight:600;padding:4px 14px;
-      border-radius:12px 0 12px 0; letter-spacing:0.04em;white-space:nowrap;
-      box-shadow: 2px 2px 6px rgba(0,0,0,0.2);`;
-    tag.textContent = region.label;
-    
-    div.appendChild(tag);
-    div.addEventListener('click', e => {
-      e.stopPropagation();
-      state.selectedRegion = region.id;
-      state.selectedNode = null;
-      state.selectedConn = null;
-      renderRegions();
-      setStatus('已選取情境區域 — 雙擊編輯名稱，拖曳移動（含框內節點）');
-    });
-    div.addEventListener('dblclick', e => { e.stopPropagation(); openRegionEdit(region.id); });
-    div.addEventListener('mousedown', e => { if (state.mode === 'select') onRegionDrag(e, region.id); });
-    rLayer.appendChild(div);
-  });
-}
-
-function addDragon() {
-  const inp = document.getElementById('new-dragon-name');
-  const name = inp.value.trim() || `龍 ${state.dragons.length + 1}`;
-  const id = uid();
-  state.dragons.push({ id, name, nodes: [], connections: [], regions: [], texts: [] });
-  inp.value = '';
-  setActiveDragon(id);
-}
-
-function setActiveDragon(id) {
-  state.activeDragon = id;
-  state.selectedNode = null;
-  state.selectedConn = null;
-  state.selectedRegion = null;
-  state.multiSelect = { nodes: [], conns: [], regions: [], texts: [] };
-  renderSidebar();
-  renderCanvas();
-}
-
-function deleteDragon(id, e) {
-  e.stopPropagation();
-  customConfirm('確定刪除這隻龍及所有節點？', '刪除', () => {
-    state.dragons = state.dragons.filter(d => d.id !== id);
-    if (state.activeDragon === id) state.activeDragon = state.dragons[0]?.id || null;
-    renderSidebar();
-    renderCanvas();
-  });
-}
-
-function showImport() {
-  if (!getDragon()) { setStatus('⚠ 請先選擇或新增龍角色'); return; }
-  document.getElementById('import-text').value = '';
-  showModal('modal-import');
-}
-
-function importActions() {
-  const dragon = getDragon();
-  if (!dragon) return;
-  const text = document.getElementById('import-text').value;
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l);
-
-  const cols = 4;
-  const startX = 40;
-  const startY = 40;
-  const padX = 180;
-  const padY = 110;
-
-  lines.forEach((line, i) => {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    dragon.nodes.push({
-      id: uid(),
-      name: line,
-      cat: detectCat(line),
-      x: startX + col * padX,
-      y: startY + row * padY,
-      notes: '',
-      w: 160, h: 70,
-    });
-  });
-
-  hideModal('modal-import');
-  renderCanvas();
-  setStatus(`已生成 ${lines.length} 個節點`);
-}
-
-function setMode(mode) {
-  state.mode = mode;
-  state.connectFrom = null;
-  document.getElementById('btn-select').classList.toggle('active', mode === 'select');
-  document.getElementById('btn-connect').classList.toggle('active', mode === 'connect');
-  document.getElementById('btn-region').classList.toggle('active', mode === 'region');
-  document.getElementById('btn-text').classList.toggle('active', mode === 'text');
-  const wrap = document.getElementById('canvas-wrap');
-  wrap.style.cursor = mode === 'connect' ? 'crosshair' : mode === 'region' ? 'crosshair' : mode === 'text' ? 'text' : 'default';
-  const msgs = {
-    select: '選取模式 — 拖曳節點移動，雙擊節點編輯',
-    connect: '連線模式 — 點第一個節點，再點第二個節點建立連線',
-    region: '框選情境模式 — 在畫布空白處拖拉框選範圍，然後輸入情境名稱',
-    text: '文字模式 — 點畫布任意位置放置文字 (T)',
-  };
-  setStatus(msgs[mode] || '');
-  renderCanvas();
-}
-
-function onNodeMousedown(e, nodeId) {
-  e.stopPropagation();
-  if (e.button !== 0) return;
-  if (state.preview) return;
-
-  if (state.mode === 'connect') {
-    handleConnectClick(nodeId);
-    return;
-  }
-
-  const dragon = getDragon();
-  const isInMultiSelect = state.multiSelect.nodes.includes(nodeId);
-
-  if (isInMultiSelect && state.multiSelect.nodes.length > 1) {
-    const nodeIds = state.multiSelect.nodes;
-    const origPositions = nodeIds.map(id => {
-      const n = dragon.nodes.find(n => n.id === id);
-      return { id, x: n.x, y: n.y };
-    });
-    const startMouseX = e.clientX, startMouseY = e.clientY;
-    let hasMoved = false;
-
-    const onMove = ev => {
-      const dx = ev.clientX - startMouseX;
-      const dy = ev.clientY - startMouseY;
-      if (!hasMoved && Math.hypot(dx, dy) < 4) return;
-      if (!hasMoved) {
-        hasMoved = true;
-        dragon.connections.forEach(c => {
-          if (nodeIds.includes(c.from) || nodeIds.includes(c.to)) { c.userPts = null; c.midOffset = null; }
-        });
-      }
-      origPositions.forEach(o => {
-        const n = dragon.nodes.find(n => n.id === o.id);
-        if (!n) return;
-        n.x = Math.max(0, o.x + dx);
-        n.y = Math.max(0, o.y + dy);
-        const el = document.getElementById('node-' + o.id);
-        if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; }
-      });
-      renderConnections();
-    };
-    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-    return;
-  }
-
-  state.selectedNode = nodeId;
-  state.selectedConn = null;
-  state.multiSelect = { nodes: [], conns: [], regions: [], texts: [] };
-
-  const node = dragon.nodes.find(n => n.id === nodeId);
-  state.dragging = { nodeId, startMouseX: e.clientX, startMouseY: e.clientY, startNodeX: node.x, startNodeY: node.y };
-  renderCanvas();
-
-  let hasMoved = false;
-  const onMove = ev => {
-    if (!state.dragging) return;
-    const dx = ev.clientX - state.dragging.startMouseX;
-    const dy = ev.clientY - state.dragging.startMouseY;
-    if (!hasMoved && Math.hypot(dx, dy) < 4) return; // ignore tiny jitter
-    if (!hasMoved) {
-      // Only reset connections on actual drag start, not on click
-      hasMoved = true;
-      dragon.connections.forEach(c => {
-        if (c.from === nodeId || c.to === nodeId) { c.userPts = null; c.midOffset = null; }
-      });
-    }
-    node.x = Math.max(0, state.dragging.startNodeX + dx);
-    node.y = Math.max(0, state.dragging.startNodeY + dy);
-    const el = document.getElementById('node-' + nodeId);
-    if (el) { el.style.left = node.x + 'px'; el.style.top = node.y + 'px'; }
-    renderConnections();
-  };
-  const onUp = () => {
-    state.dragging = null;
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-  };
-
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
-}
-
-function renderConnections() {
-  const dragon = getDragon();
-  const svg = document.getElementById('svg-conn');
-  const svgTop = document.getElementById('svg-top');
-  const defs = document.getElementById('svg-defs');
-  while (svg.lastChild && svg.lastChild !== defs) svg.removeChild(svg.lastChild);
-  if (svgTop) svgTop.innerHTML = '';
-  if (!dragon) return;
-  dragon.connections.forEach(conn => {
-    const fromNode = dragon.nodes.find(n => n.id === conn.from);
-    const toNode = dragon.nodes.find(n => n.id === conn.to);
-    if (!fromNode || !toNode) return;
-    const fromFrac = conn.fromFrac ?? 0.5;
-    const toFrac   = conn.toFrac   ?? 0.5;
-    drawConnection(svg, conn, fromNode, toNode, fromFrac, toFrac);
-  });
-}
-
-function handleConnectClick(nodeId) {
-  if (!state.connectFrom) {
-    state.connectFrom = nodeId;
-    setStatus('連線模式 — 請點選第二個節點');
-    renderCanvas();
-  } else if (state.connectFrom === nodeId) {
-    state.connectFrom = null;
-    renderCanvas();
-    setStatus('連線模式 — 點第一個節點，再點第二個節點建立連線');
-  } else {
-    state.pendingConn = { from: state.connectFrom, to: nodeId };
-    state.connectFrom = null;
-    document.querySelector('input[name="conn-dir"][value="forward"]').checked = true;
-    state.selectedConnColor = 'blue';
-    state.selectedConnShape = 'diamond';
-    document.getElementById('conn-same-pose').checked = true;
-    buildConnColorPicker('conn-color-picker', false);
-    buildShapePicker('conn-shape-picker', false);
-    showModal('modal-conn');
-  }
-}
-
-function confirmConnect() {
-  const dragon = getDragon();
-  if (!dragon || !state.pendingConn) return;
-  const dir = document.querySelector('input[name="conn-dir"]:checked').value;
-  const samePose = document.getElementById('conn-same-pose').checked;
-  dragon.connections.push({
-    id: cid(),
-    from: state.pendingConn.from,
-    to: state.pendingConn.to,
-    label: '',
-    dir,
-    color: state.selectedConnColor,
-    shape: state.selectedConnShape,
-    samePose,
-  });
-  state.pendingConn = null;
-  hideModal('modal-conn');
-  renderCanvas();
-  setStatus('連線已建立！繼續點選節點建立更多連線');
-}
-
-function cancelConnect() {
-  state.pendingConn = null;
-  state.connectFrom = null;
-  hideModal('modal-conn');
-  renderCanvas();
-}
-
-function openNodeEdit(nodeId) {
-  const dragon = getDragon();
-  const node = dragon.nodes.find(n => n.id === nodeId);
-  if (!node) return;
-  state.editingNode = nodeId;
-  document.getElementById('node-edit-name').value = node.name;
-  document.getElementById('node-edit-notes').value = node.notes || '';
-  const sel = document.getElementById('node-edit-cat');
-  sel.innerHTML = Object.keys(CATS).map(k => `<option value="${k}" ${k === node.cat ? 'selected' : ''}>${k}</option>`).join('');
-  showModal('modal-node');
-}
-
-function saveNode() {
-  const dragon = getDragon();
-  const node = dragon.nodes.find(n => n.id === state.editingNode);
-  if (!node) return;
-  node.name = document.getElementById('node-edit-name').value.trim() || node.name;
-  node.cat = document.getElementById('node-edit-cat').value;
-  node.notes = document.getElementById('node-edit-notes').value.trim();
-  hideModal('modal-node');
-  renderCanvas();
-}
-
-function deleteNode() {
-  customConfirm('確定刪除此節點及其所有連線？', '刪除', () => {
-    const dragon = getDragon();
-    dragon.nodes = dragon.nodes.filter(n => n.id !== state.editingNode);
-    dragon.connections = dragon.connections.filter(c => c.from !== state.editingNode && c.to !== state.editingNode);
-    state.editingNode = null;
-    hideModal('modal-node');
-    renderCanvas();
-  });
-}
-
-function openConnEdit(connId) {
-  const dragon = getDragon();
-  const conn = dragon.connections.find(c => c.id === connId);
-  if (!conn) return;
-  state.editingConn = connId;
-  state.selectedConn = connId;
-  state.editingConnColor = conn.color || 'blue';
-  state.editingConnShape = conn.shape || 'diamond';
-  document.querySelector(`input[name="conn-edit-dir"][value="${conn.dir}"]`).checked = true;
-  document.getElementById('conn-edit-same-pose').checked = conn.samePose !== false;
-  buildConnColorPicker('conn-edit-color-picker', true);
-  buildShapePicker('conn-edit-shape-picker', true);
-  showModal('modal-conn-edit');
-  renderConnections();
-}
-
-function saveConn() {
-  const dragon = getDragon();
-  const conn = dragon.connections.find(c => c.id === state.editingConn);
-  if (!conn) return;
-  conn.dir      = document.querySelector('input[name="conn-edit-dir"]:checked').value;
-  conn.color    = state.editingConnColor;
-  conn.shape    = state.editingConnShape;
-  conn.samePose = document.getElementById('conn-edit-same-pose').checked;
-  state.selectedConn = null;
-  hideModal('modal-conn-edit');
-  renderCanvas();
-}
-
-function deleteConn() {
-  const dragon = getDragon();
-  if (!dragon) return;
-  dragon.connections = dragon.connections.filter(c => c.id !== state.editingConn);
-  state.editingConn = null;
-  state.selectedConn = null;
-  hideModal('modal-conn-edit');
-  renderCanvas();
-}
-
-function clearCanvas() {
-  const dragon = getDragon();
-  if (!dragon) return;
-  customConfirm('確定清除所有節點、連線和情境區域？', '清除', () => {
-    dragon.nodes = [];
-    dragon.connections = [];
-    dragon.regions = [];
-    renderCanvas();
-  });
-}
-
-function autoLayout() {
-  const dragon = getDragon();
-  if (!dragon || dragon.nodes.length === 0) return;
-  const groups = {};
-  dragon.nodes.forEach(n => {
-    if (!groups[n.cat]) groups[n.cat] = [];
-    groups[n.cat].push(n);
-  });
-  const catOrder = ['出現', '待機', '移動', '飛行', '攻擊', '受傷', '死亡', '吼叫', '其他'];
-  const cols = 4;
-  let row = 0, col = 0;
-  const padX = 185, padY = 115, startX = 30, startY = 30;
-
-  catOrder.forEach(cat => {
-    if (!groups[cat]) return;
-    groups[cat].forEach(node => {
-      node.x = startX + col * padX;
-      node.y = startY + row * padY;
-      col++;
-      if (col >= cols) { col = 0; row++; }
-    });
-  });
-  renderCanvas();
-}
-
-// ─── 匯出 PNG (包含新箭頭) ───
-function exportPNG() {
-  const dragon = getDragon();
-  if (!dragon || dragon.nodes.length === 0) { setStatus('⚠ 沒有可匯出的節點'); return; }
-
-  let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
-  dragon.nodes.forEach(n => {
-    const w = n.w || 160, h = n.h || 70;
-    minX = Math.min(minX, n.x);
-    minY = Math.min(minY, n.y);
-    maxX = Math.max(maxX, n.x + w);
-    maxY = Math.max(maxY, n.y + h);
-  });
-
-  const pad = 40;
-  const W = maxX - minX + pad * 2;
-  const H = maxY - minY + pad * 2;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = W * 2; canvas.height = H * 2; 
-  const ctx = canvas.getContext('2d');
-  ctx.scale(2, 2);
-
-  ctx.fillStyle = '#14141e';
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.fillStyle = '#2a2a38';
-  for (let gx = 0; gx < W; gx += 28) {
-    for (let gy = 0; gy < H; gy += 28) {
-      ctx.beginPath();
-      ctx.arc(gx, gy, 1, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  const ox = -minX + pad, oy = -minY + pad;
-
-  function pngEndpointArrow(ax, ay, angle, color) {
-    const S=12, W=0.45;
-    ctx.fillStyle = color;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(ax - S*Math.cos(angle-W), ay - S*Math.sin(angle-W));
-    ctx.lineTo(ax - S*Math.cos(angle+W), ay - S*Math.sin(angle+W));
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  }
-  
-  function pngDiamond(px, py, color) {
-    const s = 7;
-    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.fillStyle = '#14141e';
-    ctx.beginPath();
-    ctx.moveTo(px, py-s); ctx.lineTo(px+s, py); ctx.lineTo(px, py+s); ctx.lineTo(px-s, py);
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-  }
-
-  dragon.nodes.forEach(node => {
-    const cat = CATS[node.cat] || CATS['其他'];
-    const x = node.x + ox, y = node.y + oy;
-    const w = node.w || 160, h = node.h || 70;
-    const r = 8;
-
-    ctx.fillStyle = cat.bg;
-    ctx.strokeStyle = cat.border;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, h, r);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = cat.text;
-    ctx.font = '13px Consolas, Courier New, monospace';
-    ctx.textAlign = 'left';
-    const words = node.name;
-    ctx.fillText(words.length > 22 ? words.slice(0, 22) + '…' : words, x + 12, y + 22);
-
-    if (node.notes) {
-      ctx.fillStyle = cat.label;
-      ctx.font = 'italic 11px Segoe UI, sans-serif';
-      ctx.fillText(node.notes.length > 26 ? node.notes.slice(0, 26) + '…' : node.notes, x + 12, y + 38);
-    }
-  });
-
-  ctx.fillStyle = '#555';
-  ctx.font = '11px Segoe UI, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText(dragon.name + ' — Dragon Flow', pad, H - 10);
-
-  const link = document.createElement('a');
-  link.download = `${dragon.name.replace(/\s/g, '_')}_flow.png`;
-  link.href = canvas.toDataURL('image/png');
-  link.click();
-}
-
-function buildShapePicker(containerId, isEdit) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  container.innerHTML = '';
-  const selectedId = isEdit ? state.editingConnShape : state.selectedConnShape;
-  POSE_SHAPES.forEach(sh => {
-    const btn = document.createElement('div');
-    const isSel = sh.id === selectedId;
-    btn.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 8px;border-radius:6px;cursor:pointer;
-      border:2px solid ${isSel ? '#7eb8f0' : 'transparent'};background:${isSel ? 'rgba(126,184,240,0.12)' : 'transparent'};`;
-
-    if (sh.id === 'none') {
-      const preview = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      preview.setAttribute('width', '24'); preview.setAttribute('height', '24');
-      preview.setAttribute('viewBox', '0 0 24 24');
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', '4'); line.setAttribute('y1', '12');
-      line.setAttribute('x2', '20'); line.setAttribute('y2', '12');
-      line.setAttribute('stroke', '#666'); line.setAttribute('stroke-width', '2');
-      line.setAttribute('stroke-dasharray', '3,2');
-      preview.appendChild(line);
-      btn.appendChild(preview);
-    } else {
-      const preview = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      preview.setAttribute('width', '24'); preview.setAttribute('height', '24');
-      preview.setAttribute('viewBox', '0 0 24 24');
-      drawPoseShape(preview, sh.id, 12, 12, 8, '#14141e', '#7eb8f0');
-      btn.appendChild(preview);
-    }
-    const lbl = document.createElement('span');
-    lbl.style.cssText = 'font-size:10px;color:#aaa;white-space:nowrap;';
-    lbl.textContent = sh.label;
-    btn.appendChild(lbl);
-    btn.onclick = () => {
-      if (isEdit) state.editingConnShape = sh.id;
-      else state.selectedConnShape = sh.id;
-      buildShapePicker(containerId, isEdit);
-    };
-    container.appendChild(btn);
-  });
-}
-
-function buildConnColorPicker(containerId, isEdit) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  container.innerHTML = '';
-  const selectedId = isEdit ? state.editingConnColor : state.selectedConnColor;
-  CONN_COLORS.forEach(rc => {
-    const btn = document.createElement('div');
-    const isSel = rc.id === selectedId;
-    btn.style.cssText = `width:28px;height:28px;border-radius:50%;cursor:pointer;box-sizing:border-box;
-      background:${rc.stroke};border:3px solid ${isSel ? '#fff' : 'transparent'};
-      outline:${isSel ? '2px solid '+rc.stroke : 'none'};outline-offset:2px;
-      transition:transform 0.1s;`;
-    btn.title = rc.label;
-    btn.onmouseenter = () => { btn.style.transform = 'scale(1.2)'; };
-    btn.onmouseleave = () => { btn.style.transform = ''; };
-    btn.onclick = () => {
-      if (isEdit) state.editingConnColor = rc.id;
-      else state.selectedConnColor = rc.id;
-      buildConnColorPicker(containerId, isEdit);
-    };
-    container.appendChild(btn);
-  });
-}
-
-function togglePreview() {
-  state.preview = !state.preview;
-  const btn = document.getElementById('btn-preview');
-  const editBtns = document.querySelectorAll('#toolbar .btn:not(#btn-preview)');
-  if (state.preview) {
-    document.body.classList.add('preview-mode');
-    btn.classList.add('active');
-    btn.textContent = '✏ 編輯';
-    editBtns.forEach(b => { b.disabled = true; b.style.opacity = '0.3'; });
-    setMode('select');
-    setStatus('👁 預覽模式 — 僅供瀏覽，按 P 或點「編輯」回到編輯模式');
-  } else {
-    document.body.classList.remove('preview-mode');
-    btn.classList.remove('active');
-    btn.textContent = '👁 預覽';
-    editBtns.forEach(b => { b.disabled = false; b.style.opacity = ''; });
-    setStatus('編輯模式');
-  }
-}
-
-function showModal(id) { document.getElementById(id).style.display = 'flex'; }
-function hideModal(id) { document.getElementById(id).style.display = 'none'; }
-function setStatus(msg) { document.getElementById('statusbar').textContent = msg; }
-
-function copyNode() {
-  const dragon = getDragon();
-  if (!dragon || !state.selectedNode) { setStatus('⚠ 請先點選一個節點再複製'); return; }
-  const src = dragon.nodes.find(n => n.id === state.selectedNode);
-  if (!src) return;
-  const copy = { ...src, id: uid(), x: src.x + 24, y: src.y + 24 };
-  dragon.nodes.push(copy);
-  state.selectedNode = copy.id;
-  renderCanvas();
-  setStatus('節點已複製！');
-}
-
-function onRegionDrag(e, regionId) {
-  e.stopPropagation();
-  const dragon = getDragon();
-  const region = (dragon.regions || []).find(r => r.id === regionId);
-  if (!region) return;
-  state.selectedRegion = regionId;
-  state.selectedNode = null;
-  state.selectedConn = null;
-
-  const contained = dragon.nodes.filter(n => {
-    const nw = n.w || 160, nh = n.h || 70;
-    return n.x >= region.x && n.y >= region.y &&
-           n.x + nw <= region.x + region.w &&
-           n.y + nh <= region.y + region.h;
-  });
-
-  const containedTexts = (dragon.texts || []).filter(t =>
-    t.x >= region.x && t.x <= region.x + region.w &&
-    t.y >= region.y && t.y <= region.y + region.h
-  );
-
-  const startX = e.clientX, startY = e.clientY;
-  const origRegion = { x: region.x, y: region.y };
-  const origNodes = contained.map(n => ({ id: n.id, x: n.x, y: n.y }));
-  const origTexts = containedTexts.map(t => ({ id: t.id, x: t.x, y: t.y }));
-
-  renderRegions();
-
-  const onMove = ev => {
-    const dx = ev.clientX - startX;
-    const dy = ev.clientY - startY;
-    region.x = origRegion.x + dx;
-    region.y = origRegion.y + dy;
-    origNodes.forEach(o => {
-      const node = dragon.nodes.find(n => n.id === o.id);
-      if (node) { node.x = o.x + dx; node.y = o.y + dy; }
-    });
-    origNodes.forEach(o => {
-      const el = document.getElementById('node-' + o.id);
-      if (el) {
-        const node = dragon.nodes.find(n => n.id === o.id);
-        el.style.left = node.x + 'px';
-        el.style.top  = node.y + 'px';
-      }
-    });
-    origTexts.forEach(o => {
-      const txt = (dragon.texts || []).find(t => t.id === o.id);
-      if (txt) { txt.x = o.x + dx; txt.y = o.y + dy; }
-    });
-    renderRegions();
-    renderTexts();
-    renderConnections();
-  };
-  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
-}
-
-// ─── Text Items ───────────────────────────────────────────────────────────────
-function renderTexts() {
-  const dragon = getDragon();
-  const layer = document.getElementById('text-layer');
-  if (!layer || !dragon) return;
+  const dragon = getDragon(), layer = document.getElementById('regions-layer'); if (!layer || !dragon) return;
   layer.innerHTML = '';
-  if (!dragon.texts) return;
-  dragon.texts.forEach(txt => {
-    const div = document.createElement('div');
-    const isSel = state.selectedText === txt.id;
-    div.style.cssText = `position:absolute;left:${txt.x}px;top:${txt.y}px;
-      color:#e2e0d8;font-family:'Segoe UI','PingFang TC',sans-serif;
-      font-size:${txt.size || 16}px;font-weight:${txt.bold ? '600' : '400'};
-      white-space:pre-wrap;cursor:move;user-select:none;pointer-events:auto;
-      outline:${isSel ? '1.5px dashed #7eb8f0' : 'none'};
-      padding:2px 4px;border-radius:3px;`;
-    div.textContent = txt.content;
-    div.addEventListener('mousedown', e => { e.stopPropagation(); onTextMousedown(e, txt.id); });
-    div.addEventListener('dblclick', e => { e.stopPropagation(); openTextEdit(txt.id); });
-    // Resize handle (bottom-right corner)
-    if (isSel) {
-      const rh = document.createElement('div');
-      rh.style.cssText = `position:absolute;right:-10px;bottom:-10px;width:14px;height:14px;
-        background:#7eb8f0;border-radius:50%;cursor:se-resize;pointer-events:auto;`;
-      rh.addEventListener('mousedown', e => { e.stopPropagation(); onTextResize(e, txt.id); });
-      div.appendChild(rh);
-    }
+  (dragon.regions || []).forEach(r => {
+    const rc = REGION_COLORS.find(c => c.id === r.color) || REGION_COLORS[0], div = document.createElement('div'), isSel = state.selectedRegion === r.id;
+    div.style.cssText = `position:absolute;left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;background:${rc.bg};border:1.5px ${isSel?'solid':'dashed'} ${rc.border};border-radius:12px;pointer-events:auto;backdrop-filter:blur(4px);`;
+    const tag = document.createElement('div');
+    tag.style.cssText = `position:absolute;top:-1.5px;left:-1.5px;background:${rc.border};color:${rc.text};font-size:12px;font-weight:600;padding:4px 14px;border-radius:12px 0 12px 0;`;
+    tag.textContent = r.label; div.appendChild(tag);
+    div.addEventListener('click', e => { e.stopPropagation(); state.selectedRegion = r.id; state.selectedNode = null; state.selectedConn = null; renderRegions(); });
+    div.addEventListener('dblclick', e => { e.stopPropagation(); openRegionEdit(r.id); });
+    div.addEventListener('mousedown', e => { if (state.mode === 'select') onRegionDrag(e, r.id); });
     layer.appendChild(div);
   });
 }
 
-function onTextMousedown(e, txtId) {
-  if (state.preview) return;
-  state.selectedText = txtId;
-  state.selectedNode = null; state.selectedConn = null; state.selectedRegion = null;
-  state.multiSelect = { nodes: [], conns: [], regions: [], texts: [] };
-  renderTexts();
-  setStatus('已選取文字 — 雙擊編輯，Del 刪除，拖曳右下角縮放字體');
-
-  const dragon = getDragon();
-  const txt = dragon.texts.find(t => t.id === txtId);
-  if (!txt) return;
-  const startX = e.clientX, startY = e.clientY;
-  const origX = txt.x, origY = txt.y;
+function addDragon() {
+  const inp = document.getElementById('new-dragon-name'), name = inp.value.trim() || `龍角色 ${state.dragons.length+1}`, id = uid();
+  state.dragons.push({ id, name, nodes: [], connections: [], regions: [], texts: [] });
+  inp.value = ''; setActiveDragon(id);
+}
+function setActiveDragon(id) { state.activeDragon = id; renderSidebar(); renderCanvas(); }
+function deleteDragon(id, e) { e.stopPropagation(); customConfirm('確定刪除？', '刪除', () => { state.dragons = state.dragons.filter(d => d.id !== id); if (state.activeDragon===id) state.activeDragon = state.dragons[0]?.id; renderSidebar(); renderCanvas(); }); }
+function showImport() { if (!getDragon()) return; document.getElementById('import-text').value = ''; showModal('modal-import'); }
+function importActions() {
+  const dragon = getDragon(); if (!dragon) return;
+  const lines = document.getElementById('import-text').value.split('\n').map(l => l.trim()).filter(l => l);
+  lines.forEach((line, i) => { dragon.nodes.push({ id: uid(), name: line, cat: detectCat(line), x: 40 + (i%4)*180, y: 40 + Math.floor(i/4)*110, notes: '', w: 160, h: 70 }); });
+  hideModal('modal-import'); renderCanvas();
+}
+function setMode(m) { state.mode = m; document.querySelectorAll('#toolbar .btn').forEach(b => b.classList.remove('active')); if (document.getElementById('btn-'+m)) document.getElementById('btn-'+m).classList.add('active'); renderCanvas(); }
+function onNodeMousedown(e, nodeId) {
+  e.stopPropagation(); if (e.button!==0 || state.preview) return;
+  if (state.mode === 'connect') { handleConnectClick(nodeId); return; }
+  const dragon = getDragon(), node = dragon.nodes.find(n => n.id === nodeId);
+  state.selectedNode = nodeId; state.selectedConn = null; state.multiSelect = { nodes: [], conns: [], regions: [], texts: [] };
+  const startX = e.clientX, startY = e.clientY, nodeX = node.x, nodeY = node.y;
+  let moved = false;
   const onMove = ev => {
-    txt.x = origX + ev.clientX - startX;
-    txt.y = origY + ev.clientY - startY;
-    const layer = document.getElementById('text-layer');
-    const el = layer && layer.children[Array.from(layer.children).findIndex(c => parseInt(c.style.left) === origX && parseInt(c.style.top) === origY)];
-    renderTexts();
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    if (!moved && Math.hypot(dx, dy) < 4) return;
+    if (!moved) { moved = true; dragon.connections.forEach(c => { if (c.from===nodeId || c.to===nodeId) { c.userPts=null; c.midOffset=null; } }); }
+    node.x = Math.max(0, nodeX + dx); node.y = Math.max(0, nodeY + dy);
+    const el = document.getElementById('node-'+nodeId); if (el) { el.style.left = node.x+'px'; el.style.top = node.y+'px'; }
+    renderConnections();
   };
   const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
+  document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+  renderCanvas();
 }
-
-function onTextResize(e, txtId) {
-  const dragon = getDragon();
-  const txt = dragon.texts.find(t => t.id === txtId);
-  if (!txt) return;
-  const startY = e.clientY;
-  const origSize = txt.size || 16;
-  const onMove = ev => {
-    const dy = ev.clientY - startY;
-    txt.size = Math.max(8, Math.min(120, origSize + dy * 0.5));
-    renderTexts();
-  };
-  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
-}
-
-function openTextEdit(txtId) {
-  const dragon = getDragon();
-  const txt = dragon.texts.find(t => t.id === txtId);
-  if (!txt) return;
-  state.editingText = txtId;
-  document.getElementById('text-edit-content').value = txt.content;
-  showModal('modal-text-edit');
-  setTimeout(() => document.getElementById('text-edit-content').focus(), 50);
-}
-
-function saveTextItem() {
-  const dragon = getDragon();
-  const txt = dragon.texts.find(t => t.id === state.editingText);
-  if (!txt) return;
-  txt.content = document.getElementById('text-edit-content').value;
-  hideModal('modal-text-edit');
-  renderTexts();
-}
-
-function deleteTextItem() {
-  const dragon = getDragon();
+function renderConnections() {
+  const dragon = getDragon(), svg = document.getElementById('svg-conn'), defs = document.getElementById('svg-defs');
+  while (svg.lastChild && svg.lastChild !== defs) svg.removeChild(svg.lastChild);
+  const svgTop = document.getElementById('svg-top'); if (svgTop) svgTop.innerHTML = '';
   if (!dragon) return;
-  dragon.texts = dragon.texts.filter(t => t.id !== state.editingText);
-  state.editingText = null;
-  state.selectedText = null;
-  hideModal('modal-text-edit');
-  renderTexts();
+  dragon.connections.forEach(c => {
+    const fn = dragon.nodes.find(n => n.id === c.from), tn = dragon.nodes.find(n => n.id === c.to);
+    if (fn && tn) drawConnection(svg, c, fn, tn, c.fromFrac||0.5, c.toFrac||0.5);
+  });
 }
+function handleConnectClick(id) {
+  if (!state.connectFrom) { state.connectFrom = id; setStatus('連線模式 — 請點選第二個節點'); renderCanvas(); }
+  else if (state.connectFrom === id) { state.connectFrom = null; renderCanvas(); }
+  else {
+    state.pendingConn = { from: state.connectFrom, to: id }; state.connectFrom = null;
+    state.selectedConnColor = 'blue'; state.selectedConnShape = 'diamond';
+    buildConnColorPicker('conn-color-picker', false); buildShapePicker('conn-shape-picker', false);
+    showModal('modal-conn');
+  }
+}
+function confirmConnect() {
+  const dragon = getDragon(); if (!dragon || !state.pendingConn) return;
+  dragon.connections.push({ id: cid(), from: state.pendingConn.from, to: state.pendingConn.to, label: '', dir: document.querySelector('input[name="conn-dir"]:checked').value, color: state.selectedConnColor, shape: state.selectedConnShape, samePose: document.getElementById('conn-same-pose').checked });
+  state.pendingConn = null; hideModal('modal-conn'); renderCanvas();
+}
+function cancelConnect() { state.pendingConn = null; hideModal('modal-conn'); renderCanvas(); }
+function openNodeEdit(id) {
+  const dragon = getDragon(), node = dragon.nodes.find(n => n.id === id); if (!node) return;
+  state.editingNode = id; document.getElementById('node-edit-name').value = node.name; document.getElementById('node-edit-notes').value = node.notes || '';
+  const sel = document.getElementById('node-edit-cat');
+  sel.innerHTML = Object.keys(CATS).map(k => `<option value="${k}" ${k===node.cat?'selected':''}>${k}</option>`).join('');
+  showModal('modal-node');
+}
+function saveNode() {
+  const dragon = getDragon(), node = dragon.nodes.find(n => n.id === state.editingNode); if (!node) return;
+  node.name = document.getElementById('node-edit-name').value; node.cat = document.getElementById('node-edit-cat').value; node.notes = document.getElementById('node-edit-notes').value;
+  hideModal('modal-node'); renderCanvas();
+}
+function deleteNode() {
+  customConfirm('確定刪除節點？', '刪除', () => {
+    const dragon = getDragon(); dragon.nodes = dragon.nodes.filter(n => n.id !== state.editingNode);
+    dragon.connections = dragon.connections.filter(c => c.from!==state.editingNode && c.to!==state.editingNode);
+    hideModal('modal-node'); renderCanvas();
+  });
+}
+function openConnEdit(id) {
+  const dragon = getDragon(), c = dragon.connections.find(x => x.id === id); if (!c) return;
+  state.editingConn = id; state.editingConnColor = c.color; state.editingConnShape = c.shape;
+  document.querySelector(`input[name="conn-edit-dir"][value="${c.dir}"]`).checked = true;
+  document.getElementById('conn-edit-same-pose').checked = c.samePose!==false;
+  buildConnColorPicker('conn-edit-color-picker', true); buildShapePicker('conn-edit-shape-picker', true);
+  showModal('modal-conn-edit');
+}
+function saveConn() {
+  const dragon = getDragon(), c = dragon.connections.find(x => x.id === state.editingConn); if (!c) return;
+  c.dir = document.querySelector('input[name="conn-edit-dir"]:checked').value; c.color = state.editingConnColor; c.shape = state.editingConnShape; c.samePose = document.getElementById('conn-edit-same-pose').checked;
+  hideModal('modal-conn-edit'); renderCanvas();
+}
+function deleteConn() {
+  const dragon = getDragon(); dragon.connections = dragon.connections.filter(x => x.id !== state.editingConn);
+  hideModal('modal-conn-edit'); renderCanvas();
+}
+function clearCanvas() { customConfirm('確定清除？', '清除', () => { const d = getDragon(); d.nodes=[]; d.connections=[]; d.regions=[]; d.texts=[]; renderCanvas(); }); }
+function autoLayout() {
+  const d = getDragon(); if (!d) return;
+  d.nodes.forEach((n, i) => { n.x = 40 + (i%4)*185; n.y = 40 + Math.floor(i/4)*115; });
+  renderCanvas();
+}
+function exportPNG() {
+  const d = getDragon(); if (!d || d.nodes.length===0) return;
+  let minX=Infinity, minY=Infinity, maxX=0, maxY=0;
+  d.nodes.forEach(n => { minX=Math.min(minX, n.x); minY=Math.min(minY, n.y); maxX=Math.max(maxX, n.x+160); maxY=Math.max(maxY, n.y+70); });
+  const W = maxX-minX+100, H = maxY-minY+100, canvas = document.createElement('canvas'); canvas.width=W*2; canvas.height=H*2;
+  const ctx = canvas.getContext('2d'); ctx.scale(2,2); ctx.fillStyle='#14141e'; ctx.fillRect(0,0,W,H);
+  d.nodes.forEach(n => {
+    const c = CATS[n.cat]||CATS['其他']; ctx.fillStyle=c.bg; ctx.strokeStyle=c.border; ctx.lineWidth=1.5; ctx.beginPath(); ctx.roundRect(n.x-minX+50, n.y-minY+50, 160, 70, 8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle=c.text; ctx.font='13px Consolas'; ctx.fillText(n.name, n.x-minX+62, n.y-minY+72);
+  });
+  const a = document.createElement('a'); a.download=d.name+'.png'; a.href=canvas.toDataURL(); a.click();
+}
+function buildShapePicker(cid, isEdit) {
+  const container = document.getElementById(cid); container.innerHTML='';
+  const selId = isEdit?state.editingConnShape:state.selectedConnShape;
+  POSE_SHAPES.forEach(sh => {
+    const b = document.createElement('div'); b.style.cssText = `padding:6px;cursor:pointer;border:2px solid ${sh.id===selId?'#7eb8f0':'transparent'};`;
+    const s = document.createElementNS('http://www.w3.org/2000/svg','svg'); s.setAttribute('width','24'); s.setAttribute('height','24');
+    if (sh.id==='none') { const l = document.createElementNS('http://www.w3.org/2000/svg','line'); l.setAttribute('x1','4'); l.setAttribute('y1','12'); l.setAttribute('x2','20'); l.setAttribute('y2','12'); l.setAttribute('stroke','#666'); l.setAttribute('stroke-dasharray','3,2'); s.appendChild(l); }
+    else drawPoseShape(s, sh.id, 12, 12, 8, '#14141e', '#7eb8f0');
+    b.appendChild(s); b.onclick = () => { if (isEdit) state.editingConnShape=sh.id; else state.selectedConnShape=sh.id; buildShapePicker(cid, isEdit); };
+    container.appendChild(b);
+  });
+}
+function buildConnColorPicker(cid, isEdit) {
+  const container = document.getElementById(cid); container.innerHTML='';
+  const selId = isEdit?state.editingConnColor:state.selectedConnColor;
+  CONN_COLORS.forEach(rc => {
+    const b = document.createElement('div'); b.style.cssText = `width:24px;height:24px;border-radius:50%;background:${rc.stroke};border:2px solid ${rc.id===selId?'#fff':'transparent'};cursor:pointer;`;
+    b.onclick = () => { if (isEdit) state.editingConnColor=rc.id; else state.selectedConnColor=rc.id; buildConnColorPicker(cid, isEdit); };
+    container.appendChild(b);
+  });
+}
+function togglePreview() { state.preview=!state.preview; renderCanvas(); }
+function showModal(id) { document.getElementById(id).style.display='flex'; }
+function hideModal(id) { document.getElementById(id).style.display='none'; }
+function setStatus(m) { document.getElementById('statusbar').textContent = m; }
+function copyNode() {
+  const d = getDragon(); if (!d || !state.selectedNode) return;
+  const src = d.nodes.find(n => n.id === state.selectedNode), copy = {...src, id: uid(), x: src.x+24, y: src.y+24};
+  d.nodes.push(copy); state.selectedNode=copy.id; renderCanvas();
+}
+function onRegionDrag(e, id) {
+  const d = getDragon(), r = d.regions.find(x => x.id === id); if (!r) return;
+  const nodes = d.nodes.filter(n => n.x>=r.x && n.y>=r.y && n.x+160<=r.x+r.w && n.y+70<=r.y+r.h);
+  const startX=e.clientX, startY=e.clientY, rX=r.x, rY=r.y, nOrig=nodes.map(n=>({id:n.id,x:n.x,y:n.y}));
+  const onMove = ev => {
+    const dx=ev.clientX-startX, dy=ev.clientY-startY; r.x=rX+dx; r.y=rY+dy;
+    nOrig.forEach(o => { const n = d.nodes.find(x=>x.id===o.id); if(n){ n.x=o.x+dx; n.y=o.y+dy; } });
+    renderRegions(); renderConnections();
+  };
+  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); renderCanvas(); };
+  document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+}
+function renderTexts() {
+  const d = getDragon(), layer = document.getElementById('text-layer'); if (!layer || !d || !d.texts) return;
+  layer.innerHTML = '';
+  d.texts.forEach(t => {
+    const div = document.createElement('div'); div.style.cssText = `position:absolute;left:${t.x}px;top:${t.y}px;color:#e2e0d8;font-size:${t.size||16}px;cursor:move;white-space:pre;pointer-events:auto;${state.selectedText===t.id?'outline:1px dashed #7eb8f0':''}`;
+    div.textContent = t.content; div.addEventListener('mousedown', e => { e.stopPropagation(); state.selectedText=t.id; renderTexts(); onTextMousedown(e, t.id); });
+    div.addEventListener('dblclick', e => { e.stopPropagation(); openTextEdit(t.id); });
+    layer.appendChild(div);
+  });
+}
+function onTextMousedown(e, id) {
+  const d = getDragon(), t = d.texts.find(x=>x.id===id); if (!t) return;
+  const startX=e.clientX, startY=e.clientY, tX=t.x, tY=t.y;
+  const onMove = ev => { t.x=tX+ev.clientX-startX; t.y=tY+ev.clientY-startY; renderTexts(); };
+  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+  document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+}
+function openTextEdit(id) { const d = getDragon(); const t = d.texts.find(x=>x.id===id); state.editingText=id; document.getElementById('text-edit-content').value=t.content; showModal('modal-text-edit'); }
+function saveTextItem() { const d = getDragon(), t = d.texts.find(x=>x.id===state.editingText); t.content=document.getElementById('text-edit-content').value; hideModal('modal-text-edit'); renderTexts(); }
+function deleteTextItem() { const d = getDragon(); d.texts=d.texts.filter(x=>x.id!==state.editingText); hideModal('modal-text-edit'); renderTexts(); }
 
 document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
-  if (state.preview) return;
-  const validTargets = ['canvas-wrap', 'canvas', 'grid-bg'];
-
-  // Text placement mode
-  if (state.mode === 'text' && validTargets.includes(e.target.id)) {
-    const wrap = document.getElementById('canvas-wrap');
-    const rect = wrap.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const dragon = getDragon();
-    if (!dragon) return;
-    if (!dragon.texts) dragon.texts = [];
-    const newTxt = { id: uid(), content: '文字', x, y, size: 16 };
-    dragon.texts.push(newTxt);
-    state.selectedText = newTxt.id;
-    state.editingText = newTxt.id;
-    renderTexts();
-    // Open edit immediately
-    document.getElementById('text-edit-content').value = '文字';
-    showModal('modal-text-edit');
-    setTimeout(() => { const el = document.getElementById('text-edit-content'); el.focus(); el.select(); }, 50);
-    return;
+  if (state.preview) return; const wrap = document.getElementById('canvas-wrap'), rect = wrap.getBoundingClientRect();
+  const startX=e.clientX-rect.left, startY=e.clientY-rect.top;
+  if (state.mode==='text') {
+    const d=getDragon(); if(!d.texts) d.texts=[]; const id=uid(); d.texts.push({id, content:'文字', x:startX, y:startY, size:16}); state.selectedText=id; renderTexts(); openTextEdit(id); return;
   }
-
-  if (state.mode === 'select' && validTargets.includes(e.target.id)) {
-    const wrap = document.getElementById('canvas-wrap');
-    const rect = wrap.getBoundingClientRect();
-    const startX = e.clientX - rect.left;
-    const startY = e.clientY - rect.top;
+  if (state.mode==='select' && (e.target.id==='canvas-wrap' || e.target.id==='grid-bg')) {
     const selRect = document.getElementById('select-rect');
-    let dragged = false;
-
     const onMove = ev => {
-      const cx = ev.clientX - rect.left, cy = ev.clientY - rect.top;
-      const x = Math.min(startX, cx), y = Math.min(startY, cy);
-      const w = Math.abs(cx - startX), h = Math.abs(cy - startY);
-      if (w > 4 || h > 4) {
-        dragged = true;
-        // Smoother select box styling
-        selRect.style.cssText = `display:block;position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;
-          border:1.5px dashed rgba(240,192,96,0.6);border-radius:6px;background:rgba(240,192,96,0.08);pointer-events:none;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);`;
-      }
+      const cx=ev.clientX-rect.left, cy=ev.clientY-rect.top, x=Math.min(startX,cx), y=Math.min(startY,cy), w=Math.abs(cx-startX), h=Math.abs(cy-startY);
+      selRect.style.cssText = `display:block;left:${x}px;top:${y}px;width:${w}px;height:${h}px;border:1.5px dashed rgba(240,192,96,0.6);background:rgba(240,192,96,0.05);position:absolute;`;
     };
-
     const onUp = ev => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      selRect.style.display = 'none';
-      if (!dragged) return;
-
-      const cx = ev.clientX - rect.left, cy = ev.clientY - rect.top;
-      const sx = Math.min(startX, cx), sy = Math.min(startY, cy);
-      const sw = Math.abs(cx - startX), sh = Math.abs(cy - startY);
-      if (sw < 4 || sh < 4) return;
-
-      const dragon = getDragon();
-      if (!dragon) return;
-
-      const selNodes = dragon.nodes.filter(n => {
-        const nw = n.w || 160, nh = n.h || 70;
-        return n.x < sx+sw && n.x+nw > sx && n.y < sy+sh && n.y+nh > sy;
-      }).map(n => n.id);
-
-      const selConns = dragon.connections.filter(c => selNodes.includes(c.from) && selNodes.includes(c.to)).map(c => c.id);
-      const selRegions = (dragon.regions || []).filter(r => r.x < sx+sw && r.x+r.w > sx && r.y < sy+sh && r.y+r.h > sy).map(r => r.id);
-      const selTexts = (dragon.texts || []).filter(t => t.x > sx && t.x < sx+sw && t.y > sy && t.y < sy+sh).map(t => t.id);
-
-      const total = selNodes.length + selConns.length + selRegions.length + selTexts.length;
-      if (total === 0) {
-        state.multiSelect = { nodes: [], conns: [], regions: [], texts: [] };
-        renderCanvas();
-        return;
-      }
-
-      state.multiSelect = { nodes: selNodes, conns: selConns, regions: selRegions, texts: selTexts };
-      state.selectedNode = null;
-      state.selectedConn = null;
-      state.selectedRegion = null;
-      state.selectedText = null;
-      state._dragSelectJustEnded = true;
-      renderCanvas();
-      setStatus(`已框選 ${selNodes.length} 個節點、${selConns.length} 條連線、${selRegions.length} 個情境、${selTexts.length} 個文字 — 按 Del 全部刪除`);
+      document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); selRect.style.display='none';
+      const cx=ev.clientX-rect.left, cy=ev.clientY-rect.top, sx=Math.min(startX,cx), sy=Math.min(startY,cy), sw=Math.abs(cx-startX), sh=Math.abs(cy-startY);
+      if (sw<4) return; const d=getDragon();
+      state.multiSelect.nodes = d.nodes.filter(n => n.x<sx+sw && n.x+160>sx && n.y<sy+sh && n.y+70>sy).map(n=>n.id); renderCanvas();
     };
-
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-    return;
+    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
   }
-
-  if (state.mode !== 'region') return;
-  const regionTargets = ['canvas-wrap', 'canvas', 'grid-bg', 'regions-layer', 'region-draft'];
-  if (!regionTargets.includes(e.target.id)) return;
-
-  const wrap = document.getElementById('canvas-wrap');
-  const rect = wrap.getBoundingClientRect();
-  const startX = e.clientX - rect.left;
-  const startY = e.clientY - rect.top;
-  const draft = document.getElementById('region-draft');
-
-  const onMove = ev => {
-    const cx = ev.clientX - rect.left;
-    const cy = ev.clientY - rect.top;
-    const x = Math.min(startX, cx), y = Math.min(startY, cy);
-    const w = Math.abs(cx - startX), h = Math.abs(cy - startY);
-    draft.style.cssText = `display:block;position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;
-      border:2px dashed rgba(126,184,240,0.6);border-radius:12px;background:rgba(126,184,240,0.1);pointer-events:none;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);`;
-    state.regionDraft = { x, y, w, h };
-  };
-
-  const onUp = () => {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    draft.style.display = 'none';
-    if (state.regionDraft && state.regionDraft.w > 30 && state.regionDraft.h > 30) {
-      state.pendingRegion = { ...state.regionDraft };
-      state.selectedRegionColor = 'blue';
-      document.getElementById('region-label').value = '';
-      buildColorPicker('region-color-picker', false);
-      showModal('modal-region');
-      setTimeout(() => document.getElementById('region-label').focus(), 50);
-    }
-    state.regionDraft = null;
-  };
-
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
+  if (state.mode==='region') {
+    const draft = document.getElementById('region-draft');
+    const onMove = ev => { const cx=ev.clientX-rect.left, cy=ev.clientY-rect.top, x=Math.min(startX,cx), y=Math.min(startY,cy), w=Math.abs(cx-startX), h=Math.abs(cy-startY); draft.style.cssText=`display:block;left:${x}px;top:${y}px;width:${w}px;height:${h}px;border:2px dashed rgba(126,184,240,0.6);position:absolute;`; state.regionDraft={x,y,w,h}; };
+    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); draft.style.display='none'; if (state.regionDraft?.w>30) { state.pendingRegion={...state.regionDraft}; showModal('modal-region'); } };
+    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+  }
 });
-
-function buildColorPicker(containerId, isEdit) {
-  const container = document.getElementById(containerId);
-  container.innerHTML = '';
-  const selectedId = isEdit ? state.editingRegionColor : state.selectedRegionColor;
-  REGION_COLORS.forEach(rc => {
-    const btn = document.createElement('div');
-    const isSel = rc.id === selectedId;
-    btn.style.cssText = `width:28px;height:28px;border-radius:6px;cursor:pointer;box-sizing:border-box;
-      background:${rc.bg};border:2px solid ${isSel ? '#fff' : rc.border};
-      outline:${isSel ? '2px solid #7eb8f0' : 'none'};outline-offset:1px;`;
-    btn.onclick = () => {
-      if (isEdit) state.editingRegionColor = rc.id;
-      else state.selectedRegionColor = rc.id;
-      buildColorPicker(containerId, isEdit);
-    };
-    container.appendChild(btn);
-  });
+function buildColorPicker(id, isEdit) {
+    const container = document.getElementById(id); container.innerHTML = '';
+    const selId = isEdit ? state.editingRegionColor : state.selectedRegionColor;
+    REGION_COLORS.forEach(rc => {
+        const b = document.createElement('div'); b.style.cssText = `width:24px;height:24px;background:${rc.bg};border:2px solid ${rc.id===selId?'#fff':rc.border};cursor:pointer;`;
+        b.onclick = () => { if(isEdit) state.editingRegionColor=rc.id; else state.selectedRegionColor=rc.id; buildColorPicker(id, isEdit); }; container.appendChild(b);
+    });
 }
-
 function saveRegion() {
-  const dragon = getDragon();
-  if (!dragon || !state.pendingRegion) return;
-  const label = document.getElementById('region-label').value.trim();
-  if (!label) { document.getElementById('region-label').focus(); return; }
-  if (!dragon.regions) dragon.regions = [];
-  dragon.regions.push({ id: uid(), label, color: state.selectedRegionColor, ...state.pendingRegion });
-  state.pendingRegion = null;
-  hideModal('modal-region');
-  setMode('select');
-  renderCanvas();
+    const d=getDragon(); d.regions.push({id:uid(), label:document.getElementById('region-label').value||'情境', color:state.selectedRegionColor, ...state.pendingRegion});
+    hideModal('modal-region'); setMode('select'); renderCanvas();
 }
+function openRegionEdit(id) { const d=getDragon(), r=d.regions.find(x=>x.id===id); state.editingRegion=id; state.editingRegionColor=r.color; document.getElementById('region-edit-label').value=r.label; buildColorPicker('region-edit-color-picker', true); showModal('modal-region-edit'); }
+function saveRegionEdit() { const d=getDragon(), r=d.regions.find(x=>x.id===state.editingRegion); r.label=document.getElementById('region-edit-label').value; r.color=state.editingRegionColor; hideModal('modal-region-edit'); renderCanvas(); }
+function deleteRegion() { const d=getDragon(); d.regions=d.regions.filter(x=>x.id!==state.editingRegion); hideModal('modal-region-edit'); renderCanvas(); }
 
-function openRegionEdit(regionId) {
-  const dragon = getDragon();
-  const region = (dragon.regions || []).find(r => r.id === regionId);
-  if (!region) return;
-  state.editingRegion = regionId;
-  state.editingRegionColor = region.color;
-  state.selectedRegion = regionId;
-  document.getElementById('region-edit-label').value = region.label;
-  buildColorPicker('region-edit-color-picker', true);
-  showModal('modal-region-edit');
-}
-
-function saveRegionEdit() {
-  const dragon = getDragon();
-  const region = (dragon.regions || []).find(r => r.id === state.editingRegion);
-  if (!region) return;
-  region.label = document.getElementById('region-edit-label').value.trim() || region.label;
-  region.color = state.editingRegionColor;
-  state.editingRegion = null;
-  hideModal('modal-region-edit');
-  renderCanvas();
-}
-
-function deleteRegion() {
-  customConfirm('確定刪除此情境區域？（節點不會被刪除）', '刪除', () => {
-    const dragon = getDragon();
-    if (!dragon) return;
-    dragon.regions = (dragon.regions || []).filter(r => r.id !== state.editingRegion);
-    state.editingRegion = null;
-    state.selectedRegion = null;
-    hideModal('modal-region-edit');
-    renderCanvas();
-  });
-}
-
-document.getElementById('canvas-wrap').addEventListener('click', e => {
-  const bg = ['canvas-wrap', 'canvas', 'grid-bg'];
-  if (!bg.includes(e.target.id)) return;
-  if (state._dragSelectJustEnded) { state._dragSelectJustEnded = false; return; }
-  state.selectedNode = null;
-  state.selectedConn = null;
-  state.selectedRegion = null;
-  state.multiSelect = { nodes: [], conns: [], regions: [], texts: [] };
-  renderConnections();
-  renderRegions();
-});
-
+document.getElementById('canvas-wrap').addEventListener('click', e => { if(['canvas-wrap','grid-bg'].includes(e.target.id)) { state.selectedNode=null; state.selectedConn=null; state.selectedRegion=null; state.multiSelect={nodes:[],conns:[],regions:[],texts:[]}; renderCanvas(); } });
 document.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  if (e.key === 'p' || e.key === 'P') { togglePreview(); return; }
-  if (state.preview) return;
-  if ((e.ctrlKey || e.metaKey) && e.key === 'd') { e.preventDefault(); copyNode(); }
-  if (e.key === 'Escape' || e.key === 'q' || e.key === 'Q') setMode('select');
-  if (e.key === 'w' || e.key === 'W') setMode('connect');
-  if (e.key === 'g' || e.key === 'G') setMode('region');
-  if (e.key === 't' || e.key === 'T') setMode('text');
-  if (e.key === 'Delete' || e.key === 'Backspace') {
-    const dragon = getDragon();
-    if (!dragon) return;
-    const ms = state.multiSelect;
-    if (ms.nodes.length || ms.conns.length || ms.regions.length || (ms.texts && ms.texts.length)) {
-      dragon.nodes       = dragon.nodes.filter(n => !ms.nodes.includes(n.id));
-      dragon.connections = dragon.connections.filter(c => !ms.conns.includes(c.id) && !ms.nodes.includes(c.from) && !ms.nodes.includes(c.to));
-      dragon.regions     = (dragon.regions||[]).filter(r => !ms.regions.includes(r.id));
-      dragon.texts       = (dragon.texts||[]).filter(t => !(ms.texts||[]).includes(t.id));
-      state.multiSelect  = { nodes: [], conns: [], regions: [], texts: [] };
-      renderCanvas();
-      return;
-    }
-    if (state.selectedNode) {
-      dragon.nodes = dragon.nodes.filter(n => n.id !== state.selectedNode);
-      dragon.connections = dragon.connections.filter(c => c.from !== state.selectedNode && c.to !== state.selectedNode);
-      state.selectedNode = null;
-      renderCanvas();
-    } else if (state.selectedConn) {
-      dragon.connections = dragon.connections.filter(c => c.id !== state.selectedConn);
-      state.selectedConn = null;
-      renderCanvas();
-    } else if (state.selectedRegion) {
-      dragon.regions = (dragon.regions || []).filter(r => r.id !== state.selectedRegion);
-      state.selectedRegion = null;
-      renderCanvas();
-    } else if (state.selectedText) {
-      dragon.texts = (dragon.texts || []).filter(t => t.id !== state.selectedText);
-      state.selectedText = null;
-      renderTexts();
-    }
+  if (['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
+  if (e.key==='Delete'||e.key==='Backspace') {
+    const d = getDragon();
+    if (state.selectedNode) { d.nodes=d.nodes.filter(n=>n.id!==state.selectedNode); d.connections=d.connections.filter(c=>c.from!==state.selectedNode && c.to!==state.selectedNode); state.selectedNode=null; }
+    else if (state.selectedConn) { d.connections=d.connections.filter(c=>c.id!==state.selectedConn); state.selectedConn=null; }
+    else if (state.selectedRegion) { d.regions=d.regions.filter(r=>r.id!==state.selectedRegion); state.selectedRegion=null; }
+    else if (state.selectedText) { d.texts=d.texts.filter(t=>t.id!==state.selectedText); state.selectedText=null; }
+    renderCanvas();
   }
 });
 
-function exportJSON() {
-  const data = { dragons: state.dragons, activeDragon: state.activeDragon, nextId: state.nextId };
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const link = document.createElement('a');
-  link.download = 'data.json';
-  link.href = URL.createObjectURL(blob);
-  link.click();
-  setStatus('✓ data.json 已下載，請上傳到 GitHub repo 根目錄覆蓋舊檔');
-}
-
-async function loadFromDataJson() {
-  try {
-    const res = await fetch('data.json?t=' + Date.now());
-    if (!res.ok) return false;
-    const data = await res.json();
-    if (!data.dragons || !data.dragons.length) return false;
-    data.dragons.forEach(d => { if (!d.regions) d.regions = []; if (!d.texts) d.texts = []; });
-    state.dragons = data.dragons;
-    state.activeDragon = data.activeDragon;
-    state.nextId = data.nextId || 1;
-    return true;
-  } catch(e) { return false; }
-}
-
-function shareLink() {
-  try {
-    const data = { dragons: state.dragons, activeDragon: state.activeDragon, nextId: state.nextId };
-    const json = JSON.stringify(data);
-    const compressed = btoa(encodeURIComponent(json)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-    const url = location.href.split('#')[0] + '#data=' + compressed;
-    navigator.clipboard.writeText(url).then(() => { setStatus('✓ 分享連結已複製到剪貼簿！貼給對方就能看到你的流程圖'); }).catch(() => { prompt('請手動複製這個連結：', url); });
-  } catch(e) { setStatus('⚠ 資料太大，無法產生連結，請改用匯出 PNG'); }
-}
-
-function loadFromHash() {
-  try {
-    const hash = location.hash;
-    if (!hash.startsWith('#data=')) return false;
-    const raw = hash.slice(6);
-    const b64 = raw.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = b64 + '=='.slice(0, (4 - b64.length % 4) % 4);
-    const json = decodeURIComponent(atob(padded));
-    const data = JSON.parse(json);
-    if (!data.dragons || !data.dragons.length) return false;
-    data.dragons.forEach(d => { if (!d.regions) d.regions = []; if (!d.texts) d.texts = []; });
-    state.dragons = data.dragons;
-    state.activeDragon = data.activeDragon;
-    state.nextId = data.nextId || 1;
-    return true;
-  } catch(e) { return false; }
-}
-
-const SAVE_KEY = 'dragonflow_v1';
-function saveToStorage() {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ dragons: state.dragons, activeDragon: state.activeDragon, nextId: state.nextId })); } catch(e) {}
-}
-
-function loadFromStorage() {
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return false;
-    const data = JSON.parse(raw);
-    if (!data.dragons || !data.dragons.length) return false;
-    data.dragons.forEach(d => { if (!d.regions) d.regions = []; if (!d.texts) d.texts = []; });
-    state.dragons = data.dragons;
-    state.activeDragon = data.activeDragon;
-    state.nextId = data.nextId || 1;
-    return true;
-  } catch(e) { return false; }
-}
-
-let _saveTimer = null;
-function scheduleSave() { clearTimeout(_saveTimer); _saveTimer = setTimeout(saveToStorage, 800); }
-const _origRenderCanvas = renderCanvas;
-renderCanvas = function() { _origRenderCanvas(); scheduleSave(); };
+function exportJSON() { const link=document.createElement('a'); link.download='data.json'; link.href=URL.createObjectURL(new Blob([JSON.stringify({dragons:state.dragons, activeDragon:state.activeDragon, nextId:state.nextId},null,2)],{type:'application/json'})); link.click(); }
+function shareLink() { try { const compressed = btoa(encodeURIComponent(JSON.stringify({dragons:state.dragons, activeDragon:state.activeDragon, nextId:state.nextId}))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''); const url = location.href.split('#')[0]+'#data='+compressed; navigator.clipboard.writeText(url).then(()=>setStatus('✓ 連結已複製')); } catch(e){ setStatus('⚠ 資料太大'); } }
 
 (async () => {
-  const fromJson    = await loadFromDataJson();
-  const fromHash    = !fromJson && loadFromHash();
-  const fromStorage = !fromJson && !fromHash && loadFromStorage();
-  if (!fromJson && !fromHash && !fromStorage) {
-    state.dragons.push({ id: uid(), name: 'Small Dragon', nodes: [], connections: [], regions: [], texts: [] });
-    state.activeDragon = state.dragons[0].id;
-  }
-  renderSidebar();
-  renderCanvas();
-  if (fromJson)    setStatus('✓ 已從 data.json 載入最新流程圖');
-  else if (fromHash)    setStatus('✓ 已從分享連結載入流程圖');
-  else if (fromStorage) setStatus('已自動載入上次的工作內容');
-  else setStatus('選取模式 — 點「貼上動作」開始新增節點');
+  const hash = location.hash;
+  if (hash.startsWith('#data=')) { try { const json = decodeURIComponent(atob(hash.slice(6).replace(/-/g,'+').replace(/_/g,'/'))); const data=JSON.parse(json); state.dragons=data.dragons; state.activeDragon=data.activeDragon; state.nextId=data.nextId; } catch(e){} }
+  if (!state.dragons.length) { state.dragons.push({id:uid(), name:'角色流程 1', nodes:[], connections:[], regions:[], texts:[]}); state.activeDragon=state.dragons[0].id; }
+  renderSidebar(); renderCanvas();
 })();
 </script>
 </body>
