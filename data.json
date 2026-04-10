@@ -8,8 +8,8 @@
           "id": "n66",
           "name": "Big_FlameDragon_fly_01",
           "cat": "其他",
-          "x": 265,
-          "y": 158,
+          "x": 238,
+          "y": 159,
           "notes": "",
           "w": 183,
           "h": 38
@@ -18,8 +18,8 @@
           "id": "n67",
           "name": "Big_FlameDragon_fly_02",
           "cat": "其他",
-          "x": 261,
-          "y": 257,
+          "x": 234,
+          "y": 258,
           "notes": "",
           "w": 183,
           "h": 38
@@ -28,10 +28,20 @@
           "id": "n68",
           "name": "Big_FlameDragon_Hit_01",
           "cat": "其他",
-          "x": 585,
-          "y": 215,
+          "x": 684,
+          "y": 175,
           "notes": "",
           "w": 183,
+          "h": 38
+        },
+        {
+          "id": "n80",
+          "name": "Big_FlameDragon_fly_eyes",
+          "cat": "其他",
+          "x": 234,
+          "y": 411,
+          "notes": "",
+          "w": 198,
           "h": 38
         }
       ],
@@ -63,20 +73,70 @@
           "userPts": null,
           "midOffset": null,
           "toSide": "left"
+        },
+        {
+          "id": "c82",
+          "from": "n81",
+          "to": "n68",
+          "label": "",
+          "dir": "forward",
+          "color": "amber",
+          "shape": "diamond",
+          "samePose": true,
+          "userPts": null,
+          "midOffset": null
+        },
+        {
+          "id": "c83",
+          "from": "n68",
+          "to": "n81",
+          "label": "",
+          "dir": "forward",
+          "color": "amber",
+          "shape": "diamond",
+          "samePose": true,
+          "fromSide": "right",
+          "userPts": null,
+          "midOffset": null,
+          "toSide": "left"
         }
       ],
-      "regions": [],
+      "regions": [
+        {
+          "id": "n81",
+          "label": "Fly動作",
+          "color": "coral",
+          "x": 192,
+          "y": 61,
+          "w": 326,
+          "h": 267
+        }
+      ],
       "texts": [
         {
           "id": "n77",
           "content": "常駐使用fly01，隨機播放fly02\n兩者頭尾幀可以相接",
-          "x": 254,
-          "y": 80,
+          "x": 250,
+          "y": 81,
+          "size": 16
+        },
+        {
+          "id": "n84",
+          "content": "播放Fly任意動作時，隨機播放fly_eyes",
+          "x": 222,
+          "y": 360,
+          "size": 16
+        },
+        {
+          "id": "n85",
+          "content": "受擊開獎就中斷Fly播放Hit\nHit尾幀可以接回Fly",
+          "x": 575,
+          "y": 100,
           "size": 16
         }
       ]
     }
   ],
   "activeDragon": "n65",
-  "nextId": 79
+  "nextId": 86
 }
