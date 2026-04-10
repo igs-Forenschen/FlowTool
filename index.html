@@ -515,6 +515,11 @@ function ptsToRoundedDPath(pts, radius = 12) {
     const prev = pts[i - 1], curr = pts[i], next = pts[i + 1];
     const d1 = Math.hypot(curr.x - prev.x, curr.y - prev.y);
     const d2 = Math.hypot(next.x - curr.x, next.y - curr.y);
+    // Skip rounding if either segment is too short — avoids NaN from division by ~0
+    if (d1 < 1 || d2 < 1) {
+      d += ` L ${curr.x} ${curr.y}`;
+      continue;
+    }
     const r = Math.min(radius, d1 / 2.1, d2 / 2.1);
     const v1 = { x: (curr.x - prev.x) / d1, y: (curr.y - prev.y) / d1 };
     const v2 = { x: (next.x - curr.x) / d2, y: (next.y - curr.y) / d2 };
@@ -777,10 +782,46 @@ function startSegmentDrag(e, conn, isHoriz, segIdx, simplePts) {
   const onUp = () => {
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
+    // Clean up degenerate/collinear points from userPts
+    if (conn.userPts) conn.userPts = cleanUserPts(conn.userPts, fp, tp);
     renderCanvas();
   };
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
+}
+
+// Remove redundant collinear or near-duplicate points from userPts.
+// If nothing meaningful remains, returns null so auto-routing takes over.
+function cleanUserPts(userPts, fp, tp) {
+  if (!userPts || userPts.length === 0) return null;
+
+  const full = [fp, ...userPts, tp];
+  const THRESH = 4; // px tolerance for collinearity / duplicate
+
+  // Remove duplicate consecutive points
+  let cleaned = [full[0]];
+  for (let i = 1; i < full.length; i++) {
+    const prev = cleaned[cleaned.length - 1];
+    if (Math.hypot(full[i].x - prev.x, full[i].y - prev.y) > THRESH) {
+      cleaned.push(full[i]);
+    }
+  }
+
+  // Remove collinear middle points
+  let simplified = [cleaned[0]];
+  for (let i = 1; i < cleaned.length - 1; i++) {
+    const a = simplified[simplified.length - 1];
+    const b = cleaned[i];
+    const c = cleaned[i + 1];
+    const isCollinearH = Math.abs(a.y - b.y) < THRESH && Math.abs(b.y - c.y) < THRESH;
+    const isCollinearV = Math.abs(a.x - b.x) < THRESH && Math.abs(b.x - c.x) < THRESH;
+    if (!isCollinearH && !isCollinearV) simplified.push(b);
+  }
+  simplified.push(cleaned[cleaned.length - 1]);
+
+  // Strip fp and tp back out
+  const inner = simplified.slice(1, -1);
+  return inner.length > 0 ? inner : null;
 }
 
 // ─── 端點跨節點拖曳判定 ───
