@@ -126,7 +126,7 @@ body.preview-mode .node { cursor: default !important; }
     <div id="canvas-wrap">
       <div id="grid-bg"></div>
       <div id="regions-layer"></div>
-      <div id="text-layer" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:3;"></div>
+      <div id="text-layer" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:6;"></div>
       <div id="canvas"></div>
       <svg id="svg-conn"><defs id="svg-defs"></defs></svg>
       <svg id="svg-top" style="position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:5;"></svg>
@@ -1718,25 +1718,35 @@ function renderTexts() {
 
 function onTextMousedown(e, txtId) {
   if (state.preview) return;
+  const thisDiv = e.currentTarget;
+
+  // Update selection without re-rendering
   state.selectedText = txtId;
   state.selectedNode = null; state.selectedConn = null; state.selectedRegion = null;
   state.multiSelect = { nodes: [], conns: [], regions: [], texts: [] };
-  renderTexts();
-  setStatus('已選取文字 — 雙擊編輯，Del 刪除，拖曳右下角縮放字體');
+  const layer = document.getElementById('text-layer');
+  if (layer) Array.from(layer.children).forEach(d => { d.style.outline = 'none'; });
+  if (thisDiv) thisDiv.style.outline = '1.5px dashed #7eb8f0';
+  setStatus('已選取文字 — 雙擊編輯，Del 刪除');
 
   const dragon = getDragon();
   const txt = dragon.texts.find(t => t.id === txtId);
   if (!txt) return;
   const startX = e.clientX, startY = e.clientY;
   const origX = txt.x, origY = txt.y;
+  let moved = false;
+
   const onMove = ev => {
-    txt.x = origX + ev.clientX - startX;
-    txt.y = origY + ev.clientY - startY;
-    const layer = document.getElementById('text-layer');
-    const el = layer && layer.children[Array.from(layer.children).findIndex(c => parseInt(c.style.left) === origX && parseInt(c.style.top) === origY)];
-    renderTexts();
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    if (!moved && Math.hypot(dx, dy) < 4) return;
+    moved = true;
+    txt.x = origX + dx; txt.y = origY + dy;
+    if (thisDiv) { thisDiv.style.left = txt.x + 'px'; thisDiv.style.top = txt.y + 'px'; }
   };
-  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 }
@@ -1762,56 +1772,13 @@ function openTextEdit(txtId) {
   const txt = dragon.texts.find(t => t.id === txtId);
   if (!txt) return;
   state.editingText = txtId;
-
-  // Find the div in text-layer by index (same order as dragon.texts)
-  const layer = document.getElementById('text-layer');
-  if (!layer) return;
-  const idx = dragon.texts.findIndex(t => t.id === txtId);
-  const div = layer.children[idx];
-  if (!div) return;
-
-  // Make inline editable
-  div.contentEditable = 'true';
-  div.style.outline = '1.5px solid #7eb8f0';
-  div.style.cursor = 'text';
-  div.style.userSelect = 'text';
-  div.textContent = txt.content; // ensure content is current
-  div.focus();
-
-  // Select all
-  const range = document.createRange();
-  range.selectNodeContents(div);
-  const sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-
-  let finished = false;
-  const finish = () => {
-    if (finished) return;
-    finished = true;
-    const val = div.textContent.trim();
-    div.contentEditable = 'false';
-    state.editingText = null;
-    if (!val) {
-      dragon.texts = dragon.texts.filter(t => t.id !== txtId);
-    } else {
-      txt.content = val;
-    }
-    setMode('select'); // 切回選取模式（會呼叫 renderCanvas）
-  };
-
-  div.addEventListener('keydown', ev => {
-    ev.stopPropagation(); // 避免觸發 Del 等全域快捷鍵
-    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); finish(); }
-    if (ev.key === 'Escape') {
-      finished = true;
-      div.contentEditable = 'false';
-      state.editingText = null;
-      renderTexts();
-    }
-  });
-
-  div.addEventListener('blur', finish, { once: true });
+  document.getElementById('text-edit-content').value = txt.content;
+  showModal('modal-text-edit');
+  setTimeout(() => {
+    const el = document.getElementById('text-edit-content');
+    el.focus();
+    el.select();
+  }, 50);
 }
 
 function saveTextItem() {
@@ -1820,7 +1787,6 @@ function saveTextItem() {
   if (!txt) return;
   const val = document.getElementById('text-edit-content').value.trim();
   if (!val) {
-    // 空白就刪掉
     dragon.texts = dragon.texts.filter(t => t.id !== state.editingText);
   } else {
     txt.content = val;
@@ -1853,11 +1819,17 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
     const dragon = getDragon();
     if (!dragon) return;
     if (!dragon.texts) dragon.texts = [];
-    const newTxt = { id: uid(), content: '', x, y, size: 16 };
+    const newTxt = { id: uid(), content: '文字', x, y, size: 16 };
     dragon.texts.push(newTxt);
     state.selectedText = newTxt.id;
-    renderTexts(); // 先渲染，讓 div 存在
-    openTextEdit(newTxt.id); // 再對那個 div 開啟 inline 編輯
+    state.editingText = newTxt.id;
+    renderTexts();
+    document.getElementById('text-edit-content').value = '文字';
+    showModal('modal-text-edit');
+    setTimeout(() => {
+      const el = document.getElementById('text-edit-content');
+      el.focus(); el.select();
+    }, 50);
     return;
   }
 
