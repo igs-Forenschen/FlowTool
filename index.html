@@ -39,7 +39,7 @@ body { font-family: 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
 .sep { width: 1px; height: 20px; background: #2a2a38; margin: 0 2px; }
 
 /* Canvas */
-#canvas-wrap { flex: 1; position: relative; overflow: hidden; background: #14141e; cursor: default; }
+#canvas-wrap { flex: 1; position: relative; overflow: auto; background: #14141e; cursor: default; }
 #grid-bg { position: absolute; inset: 0; background-image: radial-gradient(circle, #2a2a38 1px, transparent 1px); background-size: 28px 28px; pointer-events: none; z-index: 1; }
 #regions-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
 #canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
@@ -115,6 +115,7 @@ body.preview-mode .node { cursor: default !important; }
       <button class="btn" onclick="clearCanvas()">清除畫布</button>
       <div class="sep"></div>
       <button class="btn" onclick="autoLayout()">自動排列</button>
+      <button class="btn" onclick="showAiDraw()" style="background:#1e2a3a;border-color:#3a5a8a;color:#7eb8f0;" title="用文字描述動作與連線，AI 自動繪製">✦ AI 繪製</button>
       <div style="flex:1"></div>
       <button class="btn" onclick="exportJSON()" title="匯出 JSON 後上傳到 GitHub，其他人開網頁就能看到">↓ 匯出 JSON</button>
       <button class="btn" onclick="shareLink()" title="產生分享連結並複製到剪貼簿">🔗 產生分享連結</button>
@@ -128,8 +129,8 @@ body.preview-mode .node { cursor: default !important; }
       <div id="regions-layer"></div>
       <div id="text-layer" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:6;"></div>
       <div id="canvas"></div>
-      <svg id="svg-conn"><defs id="svg-defs"></defs></svg>
-      <svg id="svg-top" style="position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:5;"></svg>
+      <svg id="svg-conn" style="position:absolute;top:0;left:0;width:4000px;height:3000px;overflow:visible;pointer-events:none;z-index:4;"><defs id="svg-defs"></defs></svg>
+      <svg id="svg-top" style="position:absolute;top:0;left:0;width:4000px;height:3000px;overflow:visible;pointer-events:none;z-index:5;"></svg>
       <div id="region-draft" style="display:none;position:absolute;border:2px dashed #7eb8f0;border-radius:6px;background:rgba(126,184,240,0.08);pointer-events:none;z-index:6;"></div>
       <div id="select-rect" style="display:none;position:absolute;border:1.5px dashed #e0e0e0;border-radius:3px;background:rgba(255,255,255,0.05);pointer-events:none;z-index:7;"></div>
     </div>
@@ -309,6 +310,47 @@ body.preview-mode .node { cursor: default !important; }
       <button class="btn" onclick="hideModal('modal-text-edit')">取消</button>
       <button class="btn primary" onclick="saveTextItem()">儲存</button>
     </div>
+  </div>
+</div>
+
+<!-- AI Draw Modal -->
+<div id="modal-ai-draw" class="modal-overlay" style="display:none">
+  <div class="modal-box" style="width:580px;max-height:92vh;overflow-y:auto;">
+    <div class="modal-title">✦ AI 繪製流程圖</div>
+
+    <!-- Step 1: 自然語言輸入 -->
+    <div id="ai-step1">
+      <label class="modal-label" style="margin-bottom:6px;display:block;">
+        用自然語言描述動作與連線，AI 會幫你轉換成結構化格式
+      </label>
+      <div style="background:#0e0e18;border:1px solid #2a2a38;border-radius:6px;padding:10px 12px;font-size:11px;color:#666;line-height:1.7;margin-bottom:10px;">
+        動作列表每行一排（同行橫向排列）。連線用自然語言描述，可標注顏色（藍/紅/綠/橘/紫/青）。
+      </div>
+      <textarea class="modal-input" id="ai-natural-input" rows="10"
+        placeholder="# 動作列表&#10;idle_01, idle_02, idle_03&#10;walk, run&#10;attack_01, attack_02&#10;die&#10;&#10;# 連線描述&#10;idle 三個動作互相循環，藍色連線。&#10;idle 和 walk 都可以進入 attack_01，attack_01 接 attack_02，藍色連線。&#10;任何動作受傷後進入 hurt，紅色連線，hurt 結束回 idle_01。&#10;任何動作死亡進入 die，綠色連線。"></textarea>
+      <div id="ai-step1-status" style="font-size:11px;color:#7eb8f0;min-height:18px;margin-top:6px;"></div>
+      <div class="modal-actions" style="margin-top:12px;">
+        <button class="btn" onclick="hideModal('modal-ai-draw')">取消</button>
+        <button class="btn primary" id="ai-translate-btn" onclick="runAiTranslate()">✦ AI 翻譯成結構化格式</button>
+      </div>
+    </div>
+
+    <!-- Step 2: 結構化格式確認 -->
+    <div id="ai-step2" style="display:none;">
+      <label class="modal-label" style="margin-bottom:6px;display:block;">
+        AI 翻譯結果 — 請確認後再繪製（可直接編輯修正）
+      </label>
+      <div style="background:#0e0e18;border:1px solid #2a2a38;border-radius:6px;padding:8px 12px;font-size:10px;color:#555;line-height:1.6;margin-bottom:8px;">
+        格式說明：每行節點用逗號分隔為一排。連線：A -&gt; B [顏色]，可鏈式 A -&gt; B -&gt; C，可多來源 A, B -&gt; C
+      </div>
+      <textarea class="modal-input" id="ai-structured-output" rows="14" style="font-family:Consolas,monospace;font-size:12px;"></textarea>
+      <div id="ai-step2-status" style="font-size:11px;color:#7eb8f0;min-height:18px;margin-top:6px;"></div>
+      <div class="modal-actions" style="margin-top:12px;">
+        <button class="btn" onclick="aiBackToStep1()">← 重新描述</button>
+        <button class="btn primary" id="ai-draw-btn" onclick="runAiDraw()">✦ 開始繪製</button>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -536,13 +578,14 @@ function orthoRoute(fn, tn, fromFrac = 0.5, toFrac = 0.5, fromSideOverride = nul
     top: n.y - PAD, bottom: n.y + (n.h||70) + PAD
   })) : [];
 
-  // 候選折點軸
-  const ULeft  = Math.min(fn.x, tn.x) - PAD - 24;
+  // 候選折點軸（限制最小值避免超出畫布邊緣）
+  const MARGIN = 20;
+  const ULeft  = Math.max(MARGIN, Math.min(fn.x, tn.x) - PAD - 24);
   const URight  = Math.max(fn.x+(fn.w||160), tn.x+(tn.w||160)) + PAD + 24;
-  const UTop    = Math.min(fn.y, tn.y) - PAD - 24;
+  const UTop    = Math.max(MARGIN, Math.min(fn.y, tn.y) - PAD - 24);
   const UBottom = Math.max(fn.y+(fn.h||70), tn.y+(tn.h||70)) + PAD + 24;
-  const Xs = [...new Set([p1.x, p2.x, (p1.x+p2.x)/2, ULeft, URight])];
-  const Ys = [...new Set([p1.y, p2.y, (p1.y+p2.y)/2, UTop, UBottom])];
+  const Xs = [...new Set([p1.x, p2.x, (p1.x+p2.x)/2, ULeft, URight].map(v => Math.max(MARGIN, v)))];
+  const Ys = [...new Set([p1.y, p2.y, (p1.y+p2.y)/2, UTop, UBottom].map(v => Math.max(MARGIN, v)))];
   if (midOffset !== null) { if (dF.x !== 0) Xs.push(midOffset); else Ys.push(midOffset); }
 
   const candidates = [];
@@ -816,8 +859,8 @@ function startSegmentDrag(e, conn, isHoriz, segIdx, simplePts) {
   const idxB = segIdx - 1;
 
   const onMove = ev => {
-    const cx = ev.clientX - rect.left;
-    const cy = ev.clientY - rect.top;
+    const cx = ev.clientX - rect.left + wrap.scrollLeft;
+    const cy = ev.clientY - rect.top  + wrap.scrollTop;
     let newPts = initUserPts.map(p => ({ ...p }));
     if (isHoriz) {
       if (idxA >= 0 && idxA < newPts.length) newPts[idxA].y = cy;
@@ -887,8 +930,8 @@ function startEndpointDrag(e, conn, which) {
   const dragon = getDragon();
 
   const onMove = ev => {
-    const mx = ev.clientX - rect.left;
-    const my = ev.clientY - rect.top;
+    const mx = ev.clientX - rect.left + wrap.scrollLeft;
+    const my = ev.clientY - rect.top  + wrap.scrollTop;
 
     let targetNode = null;
     let minDist = Infinity;
@@ -1814,8 +1857,8 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
     e.stopPropagation();
     const wrap = document.getElementById('canvas-wrap');
     const rect = wrap.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = e.clientX - rect.left + wrap.scrollLeft;
+    const y = e.clientY - rect.top  + wrap.scrollTop;
     const dragon = getDragon();
     if (!dragon) return;
     if (!dragon.texts) dragon.texts = [];
@@ -1837,18 +1880,19 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
     if (state.editingText) return; // 編輯文字中，不攔截
     const wrap = document.getElementById('canvas-wrap');
     const rect = wrap.getBoundingClientRect();
-    const startX = e.clientX - rect.left;
-    const startY = e.clientY - rect.top;
+    // 加上捲動偏移，轉成畫布座標
+    const startX = e.clientX - rect.left + wrap.scrollLeft;
+    const startY = e.clientY - rect.top  + wrap.scrollTop;
     const selRect = document.getElementById('select-rect');
     let dragged = false;
 
     const onMove = ev => {
-      const cx = ev.clientX - rect.left, cy = ev.clientY - rect.top;
+      const cx = ev.clientX - rect.left + wrap.scrollLeft;
+      const cy = ev.clientY - rect.top  + wrap.scrollTop;
       const x = Math.min(startX, cx), y = Math.min(startY, cy);
       const w = Math.abs(cx - startX), h = Math.abs(cy - startY);
       if (w > 4 || h > 4) {
         dragged = true;
-        // Smoother select box styling
         selRect.style.cssText = `display:block;position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;
           border:1.5px dashed rgba(240,192,96,0.6);border-radius:6px;background:rgba(240,192,96,0.08);pointer-events:none;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);`;
       }
@@ -1860,7 +1904,8 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
       selRect.style.display = 'none';
       if (!dragged) return;
 
-      const cx = ev.clientX - rect.left, cy = ev.clientY - rect.top;
+      const cx = ev.clientX - rect.left + wrap.scrollLeft;
+      const cy = ev.clientY - rect.top  + wrap.scrollTop;
       const sx = Math.min(startX, cx), sy = Math.min(startY, cy);
       const sw = Math.abs(cx - startX), sh = Math.abs(cy - startY);
       if (sw < 4 || sh < 4) return;
@@ -1905,13 +1950,13 @@ document.getElementById('canvas-wrap').addEventListener('mousedown', e => {
 
   const wrap = document.getElementById('canvas-wrap');
   const rect = wrap.getBoundingClientRect();
-  const startX = e.clientX - rect.left;
-  const startY = e.clientY - rect.top;
+  const startX = e.clientX - rect.left + wrap.scrollLeft;
+  const startY = e.clientY - rect.top  + wrap.scrollTop;
   const draft = document.getElementById('region-draft');
 
   const onMove = ev => {
-    const cx = ev.clientX - rect.left;
-    const cy = ev.clientY - rect.top;
+    const cx = ev.clientX - rect.left + wrap.scrollLeft;
+    const cy = ev.clientY - rect.top  + wrap.scrollTop;
     const x = Math.min(startX, cx), y = Math.min(startY, cy);
     const w = Math.abs(cx - startX), h = Math.abs(cy - startY);
     draft.style.cssText = `display:block;position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;
@@ -2153,6 +2198,317 @@ renderCanvas = function() { _origRenderCanvas(); scheduleSave(); };
   else if (fromStorage) setStatus('已自動載入上次的工作內容');
   else setStatus('選取模式 — 點「貼上動作」開始新增節點');
 })();
+
+// ─── AI 繪製（兩步驟：翻譯 → 確認 → 繪製）────────────────────────────────────
+const COLOR_MAP = { '藍':'blue','红':'red','紅':'red','綠':'green','橘':'amber','紫':'purple','青':'teal' };
+
+function showAiDraw() {
+  // 重置回 Step 1
+  document.getElementById('ai-step1').style.display = 'block';
+  document.getElementById('ai-step2').style.display = 'none';
+  document.getElementById('ai-step1-status').textContent = '';
+  document.getElementById('ai-translate-btn').disabled = false;
+  showModal('modal-ai-draw');
+  setTimeout(() => document.getElementById('ai-natural-input').focus(), 50);
+}
+
+function aiBackToStep1() {
+  document.getElementById('ai-step1').style.display = 'block';
+  document.getElementById('ai-step2').style.display = 'none';
+  document.getElementById('ai-step1-status').textContent = '';
+  document.getElementById('ai-translate-btn').disabled = false;
+}
+
+// ── Step 1：AI 翻譯自然語言 → 結構化格式 ─────────────────────────────────────
+async function runAiTranslate() {
+  const input = document.getElementById('ai-natural-input').value.trim();
+  if (!input) {
+    document.getElementById('ai-step1-status').textContent = '⚠ 請輸入描述內容';
+    return;
+  }
+  const btn = document.getElementById('ai-translate-btn');
+  const statusEl = document.getElementById('ai-step1-status');
+  btn.disabled = true;
+  statusEl.textContent = '✦ AI 翻譯中…';
+
+  const systemPrompt = `你是遊戲動作流程圖的格式轉換 AI。
+使用者會提供自然語言描述的動作流程，你要將它轉換成以下結構化格式。
+
+輸出格式規則（只輸出格式文字，不加任何說明）：
+
+# 動作列表
+（每行一排，同行代表這些節點在同一排）
+規則一：用逗號分隔 = 各自是獨立節點
+  idle_01, idle_02, idle_03
+規則二：用 / 分隔 = 視為同一個節點（合併顯示）
+  idle_01 / idle_01_1 / idle_02
+可混用：
+  InGame, standby, leave
+  idle_01 / idle_01_1 / idle_02, idle_03
+
+# 連線規則
+（每行一條或一組連線）
+A -> B [顏色]
+A -> B -> C [顏色]
+A, B -> C [顏色]
+
+顏色只能用：藍、紅、綠、橘、紫、青
+方向只用 -> 單向。
+連線中的節點名稱，如果是 / 群組節點，只需寫其中任一個名稱即可。
+
+注意：
+- 動作名稱要和使用者提供的完全一致
+- 連線顏色根據使用者描述決定，沒說就根據語義判斷（一般藍、受傷紅、死亡綠）
+- 不要輸出情境區域，不要多餘說明`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: input }]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error?.message || 'API 錯誤');
+    const result = data.content.map(b => b.text || '').join('').trim();
+
+    // 顯示 Step 2
+    document.getElementById('ai-structured-output').value = result;
+    document.getElementById('ai-step1').style.display = 'none';
+    document.getElementById('ai-step2').style.display = 'block';
+    document.getElementById('ai-step2-status').textContent = '';
+    document.getElementById('ai-draw-btn').disabled = false;
+
+  } catch (err) {
+    statusEl.textContent = `⚠ 錯誤：${err.message}`;
+    btn.disabled = false;
+  }
+}
+
+// ── 解析結構化格式 ────────────────────────────────────────────────────────────
+function parseStructured(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  let section = 'nodes';
+  const nodeRows = [];   // [[nodeObj, ...], ...]  nodeObj = { name, aliases }
+  const rawConns = [];
+
+  for (const line of lines) {
+    if (line.includes('->')) section = 'conns';
+
+    if (section === 'nodes') {
+      // 逗號分隔 = 多個節點；每個項目內若含 / = 同一節點（aliases）
+      const items = line.split(',').map(s => s.trim()).filter(Boolean);
+      const rowNodes = items.map(item => {
+        const parts = item.split('/').map(s => s.trim()).filter(Boolean);
+        return { name: parts.join(' / '), aliases: parts };
+      });
+      if (rowNodes.length) nodeRows.push(rowNodes);
+    } else {
+      const colorMatch = line.match(/\[([^\]]+)\]/);
+      const color = COLOR_MAP[(colorMatch?.[1] || '藍').trim()] || 'blue';
+      const rule = line.replace(/\[.*\]/, '').trim();
+      const parts = rule.split('->').map(s => s.trim());
+      if (parts.length >= 2) {
+        for (let i = 0; i < parts.length - 1; i++) {
+          const froms = parts[i].split(',').map(s => s.trim()).filter(Boolean);
+          const tos   = parts[i+1].split(',').map(s => s.trim()).filter(Boolean);
+          rawConns.push({ froms, tos, color });
+        }
+      }
+    }
+  }
+
+  // 建立 alias → name 的對應表（用於連線查找）
+  const aliasToName = {};
+  nodeRows.flat().forEach(n => {
+    aliasToName[n.name] = n.name;           // 完整名稱
+    n.aliases.forEach(a => { aliasToName[a] = n.name; }); // 每個別名
+  });
+
+  const allNames = nodeRows.flat().map(n => n.name);
+
+  // 展開連線，把 alias 解析成正式節點名稱
+  const connections = [];
+  for (const rc of rawConns) {
+    for (const from of rc.froms) {
+      for (const to of rc.tos) {
+        const fromName = aliasToName[from] || from;
+        const toName   = aliasToName[to]   || to;
+        if (allNames.includes(fromName) && allNames.includes(toName)) {
+          connections.push({ from: fromName, to: toName, color: rc.color });
+        }
+      }
+    }
+  }
+  return { nodeRows, allNames, connections, aliasToName };
+}
+
+// ── Step 2：呼叫 API 判斷 samePose/shape，然後套用到畫布 ──────────────────────
+async function runAiDraw() {
+  const structured = document.getElementById('ai-structured-output').value.trim();
+  if (!structured) {
+    document.getElementById('ai-step2-status').textContent = '⚠ 格式內容為空';
+    return;
+  }
+  const btn = document.getElementById('ai-draw-btn');
+  const statusEl = document.getElementById('ai-step2-status');
+  btn.disabled = true;
+
+  try {
+    statusEl.textContent = '解析格式中…';
+    const { nodeRows, allNames, connections } = parseStructured(structured);
+
+    if (allNames.length === 0) {
+      statusEl.textContent = '⚠ 找不到任何節點，請確認動作列表格式';
+      btn.disabled = false;
+      return;
+    }
+
+    statusEl.textContent = `找到 ${allNames.length} 個節點、${connections.length} 條連線，AI 判斷端點樣式中…`;
+
+    // 呼叫 AI 判斷 samePose 和 shape
+    const styles = connections.length > 0 ? await inferConnStyles(connections) : {};
+
+    // 套用到畫布
+    applyAiDraw(nodeRows, connections, styles);
+    hideModal('modal-ai-draw');
+    setStatus(`✦ 繪製完成！${allNames.length} 個節點、${connections.length} 條連線`);
+
+  } catch (err) {
+    statusEl.textContent = `⚠ 錯誤：${err.message}`;
+    btn.disabled = false;
+  }
+}
+
+// ── 判斷每條連線的 samePose 和 shape ─────────────────────────────────────────
+async function inferConnStyles(connections) {
+  const connList = connections.map((c, i) =>
+    `${i}: ${c.from} -> ${c.to} [${c.color}]`
+  ).join('\n');
+
+  const systemPrompt = `你是遊戲動作流程圖的輔助 AI。
+針對每條動作連線，判斷：
+1. samePose（布林）：預設為 true（頭尾幀相同動作）。
+   只有當「目標動作（to）」的名稱包含以下關鍵字時才設為 false：
+   hit、hurt、die、death、dead、damage、ko
+   其他所有情況一律為 true。
+2. shape（字串）：端點圖案
+   - samePose 為 true → diamond
+   - samePose 為 false（瞬切動作）→ none
+   - 攻擊連段（attack、atk 等）→ circle
+
+只輸出 JSON，格式：{"0":{"samePose":true,"shape":"diamond"},"1":{...}}
+不要說明文字。`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: connList }]
+    })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message || 'API 錯誤');
+  const raw = data.content.map(b => b.text || '').join('');
+  const jsonStr = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  return JSON.parse(jsonStr);
+}
+
+// ── 套用結果到畫布 ────────────────────────────────────────────────────────────
+function applyAiDraw(nodeRows, connections, styles) {
+  const dragon = getDragon();
+  if (!dragon) return;
+
+  // 建立名稱→節點的映射，先計算每個節點的拓撲層級
+  const allNames = nodeRows.flat().map(n => n.name);
+  const outEdges = {};
+  const inCount  = {};
+  allNames.forEach(n => { outEdges[n] = []; inCount[n] = 0; });
+  connections.forEach(c => {
+    if (outEdges[c.from] !== undefined && inCount[c.to] !== undefined) {
+      if (!outEdges[c.from].includes(c.to)) outEdges[c.from].push(c.to);
+      inCount[c.to]++;
+    }
+  });
+
+  // 拓撲排序計算每個節點的「層（column）」
+  const colOf = {};
+  const queue = allNames.filter(n => inCount[n] === 0);
+  queue.forEach(n => { colOf[n] = 0; });
+  const tempIn = { ...inCount };
+  while (queue.length) {
+    const n = queue.shift();
+    outEdges[n].forEach(m => {
+      colOf[m] = Math.max(colOf[m] ?? 0, (colOf[n] ?? 0) + 1);
+      tempIn[m]--;
+      if (tempIn[m] === 0) queue.push(m);
+    });
+  }
+  allNames.forEach(n => { if (colOf[n] === undefined) colOf[n] = 0; });
+
+  const PAD_X = 200, PAD_Y = 120, START_X = 60, START_Y = 60;
+  const nameToId = {};
+
+  nodeRows.forEach((row, rowIdx) => {
+    const sorted = [...row].sort((a, b) => (colOf[a.name] ?? 0) - (colOf[b.name] ?? 0));
+    sorted.forEach((nodeObj, colIdx) => {
+      const node = {
+        id: uid(),
+        name: nodeObj.name,   // 顯示完整名稱（含 / 分隔）
+        cat: detectCat(nodeObj.aliases[0] || nodeObj.name),
+        notes: '',
+        x: START_X + colIdx * PAD_X,
+        y: START_Y + rowIdx * PAD_Y,
+        w: 160, h: 70,
+      };
+      dragon.nodes.push(node);
+      nameToId[nodeObj.name] = node.id;
+      // 每個 alias 也對應同一個 id
+      nodeObj.aliases.forEach(a => { nameToId[a] = node.id; });
+    });
+  });
+
+  // 建立連線
+  connections.forEach((c, i) => {
+    const fromId = nameToId[c.from];
+    const toId   = nameToId[c.to];
+    if (!fromId || !toId) return;
+    const style = styles[String(i)] || {};
+    dragon.connections.push({
+      id: cid(),
+      from: fromId, to: toId,
+      dir: 'forward',
+      color: c.color,
+      shape: style.shape ?? 'diamond',
+      samePose: style.samePose ?? true,
+      label: '',
+      fromSide: 'right',  // AI 繪製強制水平：從右邊出
+      toSide: 'left',     // AI 繪製強制水平：從左邊進
+    });
+  });
+
+  // 撐開畫布讓捲動正常
+  const maxX = Math.max(...dragon.nodes.map(n => n.x + 200)) + 100;
+  const maxY = Math.max(...dragon.nodes.map(n => n.y + 100)) + 100;
+  const spacer = document.getElementById('canvas-spacer') || (() => {
+    const s = document.createElement('div');
+    s.id = 'canvas-spacer';
+    s.style.cssText = 'position:absolute;pointer-events:none;';
+    document.getElementById('canvas').appendChild(s);
+    return s;
+  })();
+  spacer.style.width  = maxX + 'px';
+  spacer.style.height = maxY + 'px';
+
+  renderCanvas();
+}
 </script>
 </body>
 </html>
