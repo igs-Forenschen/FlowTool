@@ -194,8 +194,8 @@
           "id": "n92",
           "name": "5x_GreenDragon_Death_01",
           "cat": "其他",
-          "x": 576,
-          "y": 279,
+          "x": 586,
+          "y": 380,
           "notes": "",
           "w": 190,
           "h": 38
@@ -204,8 +204,8 @@
           "id": "n93",
           "name": "5x_GreenDragon_Death_02",
           "cat": "其他",
-          "x": 934,
-          "y": 288,
+          "x": 928,
+          "y": 353,
           "notes": "",
           "w": 190,
           "h": 38
@@ -214,8 +214,8 @@
           "id": "n94",
           "name": "5x_GreenDragon_Death_03",
           "cat": "其他",
-          "x": 1266,
-          "y": 274,
+          "x": 1206,
+          "y": 327,
           "notes": "",
           "w": 190,
           "h": 38
@@ -284,8 +284,8 @@
           "id": "n112",
           "name": "5x_Sheep_Hit_02",
           "cat": "其他",
-          "x": 597,
-          "y": 313,
+          "x": 607,
+          "y": 414,
           "notes": "",
           "w": 150,
           "h": 38
@@ -294,8 +294,8 @@
           "id": "n113",
           "name": "5x_Sheep_Scale_01LVUP",
           "cat": "其他",
-          "x": 942,
-          "y": 324,
+          "x": 936,
+          "y": 389,
           "notes": "",
           "w": 176,
           "h": 38
@@ -304,8 +304,8 @@
           "id": "n114",
           "name": "5x_Sheep_Scale_02LVUP",
           "cat": "其他",
-          "x": 1280,
-          "y": 520,
+          "x": 1227,
+          "y": 569,
           "notes": "",
           "w": 176,
           "h": 38
@@ -314,8 +314,8 @@
           "id": "n118",
           "name": "5x_Sheep_Scale_02Hit",
           "cat": "其他",
-          "x": 1277,
-          "y": 310,
+          "x": 1217,
+          "y": 363,
           "notes": "",
           "w": 169,
           "h": 38
@@ -324,18 +324,18 @@
           "id": "n119",
           "name": "5x_Sheep_Scale_03Hit",
           "cat": "其他",
-          "x": 1666,
-          "y": 514,
+          "x": 1532,
+          "y": 564,
           "notes": "",
-          "w": 150,
-          "h": 56
+          "w": 169,
+          "h": 38
         },
         {
           "id": "n130",
           "name": "5x_GreenDragon_Death_02",
           "cat": "其他",
-          "x": 1272,
-          "y": 481,
+          "x": 1219,
+          "y": 530,
           "notes": "",
           "w": 190,
           "h": 38
@@ -344,10 +344,10 @@
           "id": "n132",
           "name": "5x_GreenDragon_Death_03",
           "cat": "其他",
-          "x": 1666,
-          "y": 465,
+          "x": 1532,
+          "y": 515,
           "notes": "",
-          "w": 150,
+          "w": 182,
           "h": 56
         }
       ],
@@ -415,6 +415,74 @@
           "samePose": true,
           "userPts": null,
           "midOffset": null
+        },
+        {
+          "id": "c137",
+          "from": "n134",
+          "to": "n135",
+          "label": "",
+          "dir": "forward",
+          "color": "red",
+          "shape": "none",
+          "samePose": true
+        },
+        {
+          "id": "c138",
+          "from": "n134",
+          "to": "n136",
+          "label": "",
+          "dir": "forward",
+          "color": "red",
+          "shape": "none",
+          "samePose": true,
+          "userPts": null,
+          "midOffset": null
+        },
+        {
+          "id": "c139",
+          "from": "n136",
+          "to": "n128",
+          "label": "",
+          "dir": "forward",
+          "color": "blue",
+          "shape": "diamond",
+          "samePose": true,
+          "userPts": null,
+          "midOffset": null
+        },
+        {
+          "id": "c140",
+          "from": "n128",
+          "to": "n129",
+          "label": "",
+          "dir": "forward",
+          "color": "blue",
+          "shape": "diamond",
+          "samePose": true,
+          "userPts": null,
+          "midOffset": null
+        },
+        {
+          "id": "c141",
+          "from": "n128",
+          "to": "n131",
+          "label": "",
+          "dir": "forward",
+          "color": "blue",
+          "shape": "diamond",
+          "samePose": true,
+          "userPts": null,
+          "midOffset": null
+        },
+        {
+          "id": "c142",
+          "from": "n131",
+          "to": "n133",
+          "label": "",
+          "dir": "forward",
+          "color": "blue",
+          "shape": "diamond",
+          "samePose": true
         }
       ],
       "regions": [
@@ -422,8 +490,8 @@
           "id": "n128",
           "label": "3倍爆獎",
           "color": "coral",
-          "x": 909,
-          "y": 227,
+          "x": 903,
+          "y": 292,
           "w": 244,
           "h": 190
         },
@@ -431,8 +499,8 @@
           "id": "n129",
           "label": "3倍爆獎開獎",
           "color": "pink",
-          "x": 1252,
-          "y": 244,
+          "x": 1192,
+          "y": 297,
           "w": 227,
           "h": 141
         },
@@ -440,8 +508,8 @@
           "id": "n131",
           "label": "5倍爆獎",
           "color": "coral",
-          "x": 1248,
-          "y": 440,
+          "x": 1195,
+          "y": 489,
           "w": 262,
           "h": 165
         },
@@ -449,18 +517,45 @@
           "id": "n133",
           "label": "5倍爆獎開獎",
           "color": "pink",
-          "x": 1625,
-          "y": 438,
+          "x": 1491,
+          "y": 488,
           "w": 245,
           "h": 167
+        },
+        {
+          "id": "n134",
+          "label": "Fly動作",
+          "color": "blue",
+          "x": 104,
+          "y": 42,
+          "w": 281,
+          "h": 278
+        },
+        {
+          "id": "n135",
+          "label": "假贏小獎",
+          "color": "green",
+          "x": 531,
+          "y": 53,
+          "w": 265,
+          "h": 153
+        },
+        {
+          "id": "n136",
+          "label": "乘倍爆獎前置",
+          "color": "amber",
+          "x": 532,
+          "y": 296,
+          "w": 303,
+          "h": 182
         }
       ],
       "texts": [
         {
           "id": "n99",
           "content": "常駐使用fly01，隨機播放fly02\nDragon_Fly01 要配 Sheep_Fly_01",
-          "x": 131,
-          "y": 47,
+          "x": 128,
+          "y": 61,
           "size": 16
         },
         {
@@ -473,13 +568,20 @@
         {
           "id": "n107",
           "content": "開「乘倍爆獎」中斷Fly播放下列動作",
-          "x": 554,
-          "y": 233,
+          "x": 547,
+          "y": 330,
+          "size": 16
+        },
+        {
+          "id": "n143",
+          "content": "播放Fly任意動作時，隨機播放fly_eyes",
+          "x": 108,
+          "y": 385,
           "size": 16
         }
       ]
     }
   ],
   "activeDragon": "n86",
-  "nextId": 134
+  "nextId": 144
 }
